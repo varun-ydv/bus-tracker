@@ -151,7 +151,7 @@ export function DeparturesPanel({
   const lastPast = d.past[d.past.length - 1];
 
   return (
-    <div className="pointer-events-auto absolute bottom-3 left-3 right-3 z-[1000] mx-auto max-w-md overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950/95 text-neutral-100 shadow-2xl backdrop-blur">
+    <div className="pointer-events-auto absolute bottom-3 left-3 right-3 z-[1000] mx-auto max-w-md rounded-2xl border border-neutral-800 bg-neutral-950/95 text-neutral-100 shadow-2xl backdrop-blur">
       {/* Compact header: route + next bus */}
       <button
         onClick={() => setExpanded((v) => !v)}
@@ -366,7 +366,7 @@ function StopPicker({
   onClear?: () => void;
 }) {
   return (
-    <div className="relative" ref={containerRef}>
+    <div className={`relative ${open ? "z-30" : ""}`} ref={containerRef}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-left text-xs text-neutral-300 hover:border-neutral-700"
@@ -380,7 +380,10 @@ function StopPicker({
         <ChevronDown size={14} className="shrink-0 text-neutral-500" />
       </button>
       {open && (
-        <ul className="absolute bottom-full left-0 right-0 z-20 mb-1 max-h-60 overflow-y-auto overflow-x-hidden rounded-lg border border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur">
+        <ul
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[40dvh] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur touch-pan-y sm:max-h-60"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
           {clearable && onClear && (
             <li>
               <button
