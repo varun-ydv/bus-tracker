@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, Clock, History, Loader2, X, Bus, MapPin } from "lucide-react";
 import type { Vehicle } from "@/lib/types";
 import type { RouteStop } from "@/lib/routes";
@@ -63,6 +63,15 @@ function fmtAge(timestamp: number): string {
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
+}
+
+function useLiveTick(intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
 }
 
 export function RouteDetailPanel({
@@ -155,6 +164,10 @@ export function RouteDetailPanel({
           )}
           <div className="text-[11px] text-neutral-500">
             {routeVehicles.length} vehicle{routeVehicles.length === 1 ? "" : "s"} reporting
+            <span className="ml-2 inline-flex items-center gap-1 text-[10px] text-emerald-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              live
+            </span>
           </div>
         </div>
         <button
@@ -276,6 +289,12 @@ function VehiclesTab({
   stops?: RouteStop[];
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const now = useLiveTick(1000);
+
+  const computeUpcoming = useCallback(
+    (v: Vehicle) => getUpcomingStops(v, stops),
+    [stops]
+  );
 
   if (vehicles.length === 0) {
     return (
@@ -292,7 +311,12 @@ function VehiclesTab({
         const speedKmh = v.speed != null ? (v.speed * 3.6).toFixed(0) : null;
         const vKey = `${v.provider}-${v.id}`;
         const isOpen = expanded === vKey;
-        const upcoming = isOpen ? getUpcomingStops(v, stops) : [];
+        const upcoming = isOpen ? computeUpcoming(v) : [];
+
+        const ageSec = Math.max(0, Math.floor(now / 1000) - v.timestamp);
+        const ageStr =
+          ageSec < 60 ? `${ageSec}s ago` : ageSec < 3600 ? `${Math.floor(ageSec / 60)}m ago` : `${Math.floor(ageSec / 3600)}h ago`;
+        const isStale = ageSec > 120;
 
         return (
           <div key={vKey}>
@@ -313,8 +337,8 @@ function VehiclesTab({
                 <span className="flex-1 truncate text-sm font-medium text-neutral-100">
                   {v.headsign ?? v.label ?? `Bus ${v.id}`}
                 </span>
-                <span className="text-[10px] text-neutral-500">
-                  {fmtAge(v.timestamp)}
+                <span className={`text-[10px] tabular-nums ${isStale ? "text-amber-500" : "text-neutral-500"}`}>
+                  {ageStr}
                 </span>
               </div>
               <div className="mt-1.5 text-xs text-neutral-400">
@@ -328,16 +352,23 @@ function VehiclesTab({
                   <span>{v.occupancy.replaceAll("_", " ").toLowerCase()}</span>
                 )}
                 {upcoming.length > 0 && !isOpen && (
-                  <span className="text-neutral-600">{upcoming.length} stops ahead</span>
+                  <span className="text-neutral-600">
+                    {upcoming[0].distanceStr} to next stop
+                  </span>
                 )}
               </div>
             </button>
 
             {isOpen && upcoming.length > 0 && (
               <div className="border-t border-neutral-800/40 bg-neutral-900/30 px-4 py-2">
-                <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
-                  <MapPin size={10} className="mr-1 inline" />
-                  Next stops
+                <div className="mb-1.5 flex items-center justify-between">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                    <MapPin size={10} className="mr-1 inline" />
+                    Next stops
+                  </div>
+                  <span className="text-[9px] tabular-nums text-neutral-600">
+                    live · {ageStr}
+                  </span>
                 </div>
                 <div className="space-y-0.5">
                   {upcoming.map((stop, i) => (
@@ -357,7 +388,7 @@ function VehiclesTab({
                       <span className="min-w-0 flex-1 truncate text-neutral-200">
                         {stop.name}
                       </span>
-                      <span className="shrink-0 text-[10px] text-neutral-500">
+                      <span className="shrink-0 text-[10px] tabular-nums text-neutral-500">
                         {stop.distanceStr}
                       </span>
                     </div>
