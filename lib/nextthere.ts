@@ -5,7 +5,7 @@ const NT_SECRET = process.env.NEXTTHERE_HMAC_SECRET ?? "RCysfU7Udj7EG5nyF3MEgnJG
 const NT_APP_ID = "nextthere-web";
 const NT_CDN_BASE = "https://cdn-api-public.nextthere.com";
 const NT_REGION = "au_canberra";
-const CACHE_TTL_MS = 10_000;
+const CACHE_TTL_MS = 8_000;
 
 function hmacSign(path: string, query = ""): string {
   const stringToSign = path + (query ? "?" + query : "");
@@ -160,7 +160,7 @@ const CANBERRA_BBOX = {
   ne: { lat: -35.15, lon: 149.21 },
 };
 
-let vehicleCache: { data: Vehicle[]; at: number } | null = null;
+let vehicleCache: { data: Vehicle[]; at: number; serverTs: number } | null = null;
 
 export function nextthereConfigured(): boolean {
   return true;
@@ -195,14 +195,16 @@ export async function fetchNextthereVehicles(): Promise<Vehicle[]> {
     return vehicleCache.data;
   }
 
-  const q = `region=${CANBERRA_BBOX.sw.lat},${CANBERRA_BBOX.sw.lon},${CANBERRA_BBOX.ne.lat},${CANBERRA_BBOX.ne.lon}&w=800&h=800&z=11`;
+  const since = vehicleCache?.serverTs ? `&since=${vehicleCache.serverTs}` : "";
+  const bust = `&_=${Date.now()}`;
+  const q = `region=${CANBERRA_BBOX.sw.lat},${CANBERRA_BBOX.sw.lon},${CANBERRA_BBOX.ne.lat},${CANBERRA_BBOX.ne.lon}&w=800&h=800&z=11${since}${bust}`;
   const data = await ntFetch<NTQueryResponse>(`/${NT_REGION}/query`, q);
 
   const vehicles = data.vehicles
     .filter((v) => v.routeType === 700)
     .map(mapVehicle);
 
-  vehicleCache = { data: vehicles, at: Date.now() };
+  vehicleCache = { data: vehicles, at: Date.now(), serverTs: data.timestamp };
   return vehicles;
 }
 
