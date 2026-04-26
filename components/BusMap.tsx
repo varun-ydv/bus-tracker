@@ -95,14 +95,18 @@ function makeBusIcon(label: string, vehicle: Vehicle, highlight: boolean) {
       ? "#10b981"
       : "#a855f7");
   const safeLabel = label.length > 4 ? label.slice(0, 4) : label;
+  const bearing = typeof vehicle.bearing === "number" ? vehicle.bearing : 0;
   const ringStyle = highlight
     ? "box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 0 0 5px rgba(0,0,0,.4);"
     : "";
   return L.divIcon({
-    html: `<div class="bus-marker" style="background:${bg};${ringStyle}">${safeLabel}</div>`,
+    html: `<div class="bus-marker" style="background:${bg};${ringStyle}">
+      ${safeLabel}
+      <div class="bus-arrow" style="transform:rotate(${bearing}deg)"></div>
+    </div>`,
     className: "",
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
   });
 }
 
