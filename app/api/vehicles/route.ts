@@ -108,8 +108,8 @@ export async function GET(req: NextRequest) {
   // and a human-readable status) when the same fleet vehicle appears in both.
   const byKey = new Map<string, Vehicle>();
   const priority: Record<Vehicle["provider"], number> = {
-    nextthere: 4,
-    anytrip: 3,
+    anytrip: 4,
+    nextthere: 3,
     canberra: 2,
     nsw: 1,
   };
