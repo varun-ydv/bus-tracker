@@ -85,7 +85,7 @@ const OCCUPANCY_NAMES: Record<number, string> = {
 };
 
 let cache: { data: Vehicle[]; at: number } | null = null;
-const CACHE_TTL_MS = 10_000;
+const CACHE_TTL_MS = 5_000;
 
 export function anytripConfigured(): boolean {
   return true;

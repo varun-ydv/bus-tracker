@@ -5,7 +5,7 @@ const NT_SECRET = process.env.NEXTTHERE_HMAC_SECRET ?? "RCysfU7Udj7EG5nyF3MEgnJG
 const NT_APP_ID = "nextthere-web";
 const NT_CDN_BASE = "https://cdn-api-public.nextthere.com";
 const NT_REGION = "au_canberra";
-const CACHE_TTL_MS = 8_000;
+const CACHE_TTL_MS = 5_000;
 
 function hmacSign(path: string, query = ""): string {
   const stringToSign = path + (query ? "?" + query : "");

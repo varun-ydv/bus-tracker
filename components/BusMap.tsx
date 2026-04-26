@@ -128,7 +128,7 @@ function AutoRefresh({
       }
     };
     fetchData();
-    const id = setInterval(fetchData, 15000);
+    const id = setInterval(fetchData, 8000);
     return () => {
       cancelled = true;
       clearInterval(id);
