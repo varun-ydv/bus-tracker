@@ -167,11 +167,15 @@ export function nextthereConfigured(): boolean {
 }
 
 function mapVehicle(v: NTVehicleRaw): Vehicle {
+  let shortName = v.routeShortName || null;
+  if (shortName && /^R\d+$/.test(shortName)) {
+    shortName = shortName.slice(1);
+  }
   return {
     id: `nt:${v.id}`,
     provider: "nextthere",
     routeId: v.routeId || null,
-    routeShortName: v.routeShortName || null,
+    routeShortName: shortName,
     tripId: v.tripId || null,
     label: v.id || null,
     lat: v.position.latitude,

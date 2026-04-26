@@ -20,6 +20,17 @@ const ANYTRIP_USER_AGENT =
   "Bus-tracker/1.0 (personal use; +https://github.com/)";
 
 interface ATCoord { lat: number; lon: number }
+interface ATStopTimeEvent {
+  time?: number;
+  delay?: number;
+  occupancy?: number[];
+  vehicleOccupancy?: number;
+}
+interface ATSurroundingStop {
+  stop?: { id: string; name?: unknown; code?: string };
+  arrival?: ATStopTimeEvent;
+  departure?: ATStopTimeEvent;
+}
 interface ATPosition {
   time?: number;
   bearing?: number;
@@ -29,6 +40,9 @@ interface ATPosition {
   vehicleOccupancy?: number;
   occupancy?: number[];
   coordinates?: ATCoord;
+  distance?: number;
+  linearDelay?: number;
+  surroundingStops?: { prev?: ATSurroundingStop; next?: ATSurroundingStop };
 }
 interface ATAgency { id: string; name: string }
 interface ATRoute {
@@ -107,6 +121,12 @@ export async function fetchAnytripVehicles(): Promise<Vehicle[]> {
 
     const vid = v.vehicleInstance?.id ?? trip?.id ?? "";
     const occCode = pos?.vehicleOccupancy ?? pos?.occupancy?.[0];
+    const ss = pos?.surroundingStops;
+    const delay =
+      pos?.linearDelay ??
+      ss?.next?.departure?.delay ??
+      ss?.prev?.departure?.delay ??
+      null;
 
     vehicles.push({
       id: `at:${vid}`,
@@ -127,6 +147,7 @@ export async function fetchAnytripVehicles(): Promise<Vehicle[]> {
       headsign: trip?.headsign?.headline ?? null,
       statusString: pos?.statusString ?? null,
       routeColor: route.color ? `#${route.color}` : null,
+      delay,
     });
   }
 
