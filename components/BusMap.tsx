@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   CircleMarker,
@@ -205,18 +205,24 @@ function useRouteGeometry(routeNumber: string | null) {
   return geo;
 }
 
+function CaptureMap({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+  const map = useMap();
+  useEffect(() => {
+    mapRef.current = map;
+  }, [map, mapRef]);
+  return null;
+}
+
 export default function BusMap() {
   const [data, setData] = useState<VehiclesResponse | null>(null);
   const [basemap, setBasemap] = usePersistedBasemap();
   const [basemapOpen, setBasemapOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
+  const mapRef = useRef<L.Map | null>(null);
   const searchParams = useSearchParams();
 
   const routesParam = searchParams.get("routes");
   const placeParam = searchParams.get("place");
 
-  // "Single-route mode" kicks in when the user has exactly one route selected
-  // (and no place). Then we overlay the shape + stops for that route.
   const singleRoute = useMemo(() => {
     if (placeParam) return null;
     if (!routesParam) return null;
@@ -227,6 +233,8 @@ export default function BusMap() {
     if (list.length !== 1) return null;
     return list[0];
   }, [routesParam, placeParam]);
+
+  const [panelOpen, setPanelOpen] = useState(!!singleRoute);
 
   const query = useMemo(() => {
     const p = new URLSearchParams();
@@ -280,6 +288,7 @@ export default function BusMap() {
 
       <AutoRefresh onData={setData} query={query} />
       <FitToBounds points={fitPoints} fitKey={fitKey} />
+      <CaptureMap mapRef={mapRef} />
       <CloseOnMapClick onClose={closeBasemap} />
 
       {/* Route shape — a thick coloured line with a dark halo underneath for
@@ -440,6 +449,9 @@ export default function BusMap() {
         color={geometry?.color ?? null}
         vehicles={data.vehicles}
         onClose={() => setPanelOpen(false)}
+        onFocusVehicle={(v) => {
+          mapRef.current?.flyTo([v.lat, v.lon], 15, { duration: 0.8 });
+        }}
       />
     )}
 

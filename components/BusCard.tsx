@@ -1,5 +1,6 @@
 import type { Vehicle } from "@/lib/types";
-import { MapPin, Gauge, Clock, ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { MapPin, Gauge, Clock, ArrowRight, ChevronRight } from "lucide-react";
 
 const PROVIDER_BADGE: Record<Vehicle["provider"], string> = {
   canberra: "ACT",
@@ -31,7 +32,10 @@ export function BusCard({ vehicle }: { vehicle: Vehicle }) {
       : "#a855f7");
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 backdrop-blur">
+    <Link
+      href={`/map?routes=${encodeURIComponent(routeLabel)}`}
+      className="flex items-center gap-3 rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 backdrop-blur hover:border-neutral-700 hover:bg-neutral-900/80 transition-colors"
+    >
       <div
         className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-neutral-950"
         style={{ backgroundColor: tileBg }}
@@ -86,7 +90,8 @@ export function BusCard({ vehicle }: { vehicle: Vehicle }) {
             {vehicle.occupancy.replaceAll("_", " ").toLowerCase()}
           </div>
         )}
+        <ChevronRight size={16} className="shrink-0 text-neutral-600" />
       </div>
-    </div>
+    </Link>
   );
 }

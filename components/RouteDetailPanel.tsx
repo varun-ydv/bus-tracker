@@ -69,11 +69,13 @@ export function RouteDetailPanel({
   color,
   vehicles,
   onClose,
+  onFocusVehicle,
 }: {
   route: RouteInfo;
   color?: string | null;
   vehicles: Vehicle[];
   onClose: () => void;
+  onFocusVehicle?: (v: Vehicle) => void;
 }) {
   const [tab, setTab] = useState<Tab>("vehicles");
   const [depState, setDepState] = useState<DepFetchState>({ kind: "idle" });
@@ -179,7 +181,7 @@ export function RouteDetailPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: "touch" }}>
         {tab === "vehicles" ? (
-          <VehiclesTab vehicles={routeVehicles} tint={tint} routeNumber={route.number} />
+          <VehiclesTab vehicles={routeVehicles} tint={tint} routeNumber={route.number} onFocusVehicle={onFocusVehicle} />
         ) : (
           <DeparturesTabContent state={depState} tint={tint} routeNumber={route.number} stopId={stopId} setStopId={setStopId} stopPickerOpen={stopPickerOpen} setStopPickerOpen={setStopPickerOpen} stopPickerRef={stopPickerRef} />
         )}
@@ -222,10 +224,12 @@ function VehiclesTab({
   vehicles,
   tint,
   routeNumber,
+  onFocusVehicle,
 }: {
   vehicles: Vehicle[];
   tint: string;
   routeNumber: string;
+  onFocusVehicle?: (v: Vehicle) => void;
 }) {
   if (vehicles.length === 0) {
     return (
@@ -241,7 +245,11 @@ function VehiclesTab({
       {vehicles.map((v) => {
         const speedKmh = v.speed != null ? (v.speed * 3.6).toFixed(0) : null;
         return (
-          <div key={`${v.provider}-${v.id}`} className="px-4 py-3">
+          <button
+            key={`${v.provider}-${v.id}`}
+            onClick={() => onFocusVehicle?.(v)}
+            className="w-full px-4 py-3 text-left hover:bg-neutral-900/60 transition-colors"
+          >
             <div className="flex items-center gap-2">
               <span
                 className="inline-flex items-center justify-center rounded-md px-2 py-0.5 text-xs font-bold text-neutral-950"
@@ -267,7 +275,7 @@ function VehiclesTab({
                 <span>{v.occupancy.replaceAll("_", " ").toLowerCase()}</span>
               )}
             </div>
-          </div>
+          </button>
         );
       })}
     </div>
