@@ -91,6 +91,8 @@ function makeBusIcon(label: string, vehicle: Vehicle, highlight: boolean) {
       ? "#06b6d4"
       : vehicle.provider === "nsw"
       ? "#f97316"
+      : vehicle.provider === "nextthere"
+      ? "#10b981"
       : "#a855f7");
   const safeLabel = label.length > 4 ? label.slice(0, 4) : label;
   const ringStyle = highlight
@@ -371,11 +373,21 @@ export default function BusMap() {
                       ? "Transport Canberra"
                       : v.provider === "nsw"
                       ? "Transport NSW"
+                      : v.provider === "nextthere"
+                      ? "NextThere"
                       : "AnyTrip")}
                   {v.label && ` · #${v.label}`}
                 </div>
+                {v.delay != null && (
+                  <div className={v.delay > 120 ? "text-amber-600" : v.delay < -30 ? "text-blue-600" : "text-green-600"}>
+                    {Math.abs(v.delay) < 30 ? "On time" : v.delay > 0 ? `${Math.round(v.delay / 60)} min late` : `${Math.round(Math.abs(v.delay) / 60)} min early`}
+                  </div>
+                )}
                 {v.speed != null && (
                   <div>Speed: {(v.speed * 3.6).toFixed(0)} km/h</div>
+                )}
+                {v.occupancy && (
+                  <div>Occupancy: {v.occupancy.replaceAll("_", " ").toLowerCase()}</div>
                 )}
                 {v.statusString && (
                   <div className="mt-1 italic text-neutral-600">

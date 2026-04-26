@@ -6,6 +6,7 @@ const PROVIDER_BADGE: Record<Vehicle["provider"], string> = {
   canberra: "ACT",
   nsw: "NSW",
   anytrip: "AT",
+  nextthere: "NT",
 };
 
 export function BusCard({ vehicle }: { vehicle: Vehicle }) {

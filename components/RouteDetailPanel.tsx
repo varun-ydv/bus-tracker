@@ -236,6 +236,14 @@ function TabBtn({
   );
 }
 
+function fmtDelay(delaySec: number | null | undefined): { text: string; color: string } | null {
+  if (delaySec == null) return null;
+  const min = Math.round(delaySec / 60);
+  if (Math.abs(min) < 1) return { text: "On time", color: "#22c55e" };
+  if (min > 0) return { text: `+${min} min`, color: "#f59e0b" };
+  return { text: `${min} min`, color: "#3b82f6" };
+}
+
 function getUpcomingStops(
   vehicle: Vehicle,
   stops?: RouteStop[]
@@ -347,6 +355,12 @@ function VehiclesTab({
                 )}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-neutral-500">
+                {(() => {
+                  const d = fmtDelay(v.delay);
+                  return d ? (
+                    <span className="font-medium" style={{ color: d.color }}>{d.text}</span>
+                  ) : null;
+                })()}
                 {speedKmh != null && <span>{speedKmh} km/h</span>}
                 {v.occupancy && (
                   <span>{v.occupancy.replaceAll("_", " ").toLowerCase()}</span>

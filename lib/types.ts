@@ -1,4 +1,4 @@
-export type Provider = "canberra" | "nsw" | "anytrip";
+export type Provider = "canberra" | "nsw" | "anytrip" | "nextthere";
 
 export interface Vehicle {
   id: string;
@@ -19,6 +19,9 @@ export interface Vehicle {
   headsign?: string | null;
   statusString?: string | null;
   routeColor?: string | null;
+  delay?: number | null;
+  vehicleType?: string | null;
+  vehicleCapacity?: number | null;
 }
 
 export interface VehiclesResponse {

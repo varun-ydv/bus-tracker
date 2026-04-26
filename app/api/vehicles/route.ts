@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { canberraConfigured, fetchCanberraVehicles } from "@/lib/canberra";
 import { nswConfigured, fetchNswVehicles } from "@/lib/nsw";
 import { anytripConfigured, fetchAnytripVehicles } from "@/lib/anytrip";
+import { nextthereConfigured, fetchNextthereVehicles } from "@/lib/nextthere";
 import { distanceMeters } from "@/lib/gtfs";
 import {
   findPlace,
@@ -33,6 +34,7 @@ export async function GET(req: NextRequest) {
       canberra: { ok: false, count: 0, configured: canberraConfigured() },
       nsw: { ok: false, count: 0, configured: nswConfigured() },
       anytrip: { ok: false, count: 0, configured: anytripConfigured() },
+      nextthere: { ok: false, count: 0, configured: nextthereConfigured() },
     },
     fetchedAt: Date.now(),
   };
@@ -85,6 +87,20 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  if (!providerFilter || providerFilter === "nextthere") {
+    tasks.push(
+      fetchNextthereVehicles()
+        .then((v) => {
+          response.vehicles.push(...v);
+          response.providers.nextthere.ok = true;
+          response.providers.nextthere.count = v.length;
+        })
+        .catch((e: Error) => {
+          response.providers.nextthere.error = e.message;
+        })
+    );
+  }
+
   await Promise.all(tasks);
 
   // De-duplicate: AnyTrip and the direct NSW feed both surface most Sydney
@@ -92,6 +108,7 @@ export async function GET(req: NextRequest) {
   // and a human-readable status) when the same fleet vehicle appears in both.
   const byKey = new Map<string, Vehicle>();
   const priority: Record<Vehicle["provider"], number> = {
+    nextthere: 4,
     anytrip: 3,
     canberra: 2,
     nsw: 1,
