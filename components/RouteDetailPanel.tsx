@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Clock, History, Loader2, X, Bus } from "lucide-react";
+import { ChevronDown, Clock, History, Loader2, X, Bus, MapPin } from "lucide-react";
 import type { Vehicle } from "@/lib/types";
+import type { RouteStop } from "@/lib/routes";
 
 interface Departure {
   tripId: string;
@@ -70,12 +71,14 @@ export function RouteDetailPanel({
   vehicles,
   onClose,
   onFocusVehicle,
+  stops,
 }: {
   route: RouteInfo;
   color?: string | null;
   vehicles: Vehicle[];
   onClose: () => void;
   onFocusVehicle?: (v: Vehicle) => void;
+  stops?: RouteStop[];
 }) {
   const [tab, setTab] = useState<Tab>("vehicles");
   const [depState, setDepState] = useState<DepFetchState>({ kind: "idle" });
@@ -181,7 +184,7 @@ export function RouteDetailPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: "touch" }}>
         {tab === "vehicles" ? (
-          <VehiclesTab vehicles={routeVehicles} tint={tint} routeNumber={route.number} onFocusVehicle={onFocusVehicle} />
+          <VehiclesTab vehicles={routeVehicles} tint={tint} routeNumber={route.number} onFocusVehicle={onFocusVehicle} stops={stops} />
         ) : (
           <DeparturesTabContent state={depState} tint={tint} routeNumber={route.number} stopId={stopId} setStopId={setStopId} stopPickerOpen={stopPickerOpen} setStopPickerOpen={setStopPickerOpen} stopPickerRef={stopPickerRef} />
         )}
@@ -220,17 +223,60 @@ function TabBtn({
   );
 }
 
+function getUpcomingStops(
+  vehicle: Vehicle,
+  stops?: RouteStop[]
+): { id: string; name: string; distanceStr: string }[] {
+  if (!stops || stops.length === 0) return [];
+
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  };
+
+  let closestIdx = 0;
+  let closestDist = Infinity;
+  for (let i = 0; i < stops.length; i++) {
+    const d = dist(vehicle.lat, vehicle.lon, stops[i].lat, stops[i].lon);
+    if (d < closestDist) {
+      closestDist = d;
+      closestIdx = i;
+    }
+  }
+
+  const upcoming = stops.slice(closestIdx + 1, closestIdx + 11);
+  return upcoming.map((s, i) => {
+    const m = dist(vehicle.lat, vehicle.lon, s.lat, s.lon);
+    return {
+      id: s.id,
+      name: s.name || s.id,
+      distanceStr:
+        m < 1000 ? `${Math.round(m / 100) * 100}m` : `${(m / 1000).toFixed(1)}km`,
+    };
+  });
+}
+
 function VehiclesTab({
   vehicles,
   tint,
   routeNumber,
   onFocusVehicle,
+  stops,
 }: {
   vehicles: Vehicle[];
   tint: string;
   routeNumber: string;
   onFocusVehicle?: (v: Vehicle) => void;
+  stops?: RouteStop[];
 }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
   if (vehicles.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-sm text-neutral-400">
@@ -244,38 +290,82 @@ function VehiclesTab({
     <div className="divide-y divide-neutral-800/60">
       {vehicles.map((v) => {
         const speedKmh = v.speed != null ? (v.speed * 3.6).toFixed(0) : null;
+        const vKey = `${v.provider}-${v.id}`;
+        const isOpen = expanded === vKey;
+        const upcoming = isOpen ? getUpcomingStops(v, stops) : [];
+
         return (
-          <button
-            key={`${v.provider}-${v.id}`}
-            onClick={() => onFocusVehicle?.(v)}
-            className="w-full px-4 py-3 text-left hover:bg-neutral-900/60 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-flex items-center justify-center rounded-md px-2 py-0.5 text-xs font-bold text-neutral-950"
-                style={{ background: tint }}
-              >
-                {routeNumber}
-              </span>
-              <span className="flex-1 truncate text-sm font-medium text-neutral-100">
-                {v.headsign ?? v.label ?? `Bus ${v.id}`}
-              </span>
-              <span className="text-[10px] text-neutral-500">
-                {fmtAge(v.timestamp)}
-              </span>
-            </div>
-            <div className="mt-1.5 text-xs text-neutral-400">
-              {v.statusString ?? (
-                <span className="italic text-neutral-500">En route</span>
-              )}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-neutral-500">
-              {speedKmh != null && <span>{speedKmh} km/h</span>}
-              {v.occupancy && (
-                <span>{v.occupancy.replaceAll("_", " ").toLowerCase()}</span>
-              )}
-            </div>
-          </button>
+          <div key={vKey}>
+            <button
+              onClick={() => {
+                setExpanded(isOpen ? null : vKey);
+                onFocusVehicle?.(v);
+              }}
+              className="w-full px-4 py-3 text-left hover:bg-neutral-900/60 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-flex items-center justify-center rounded-md px-2 py-0.5 text-xs font-bold text-neutral-950"
+                  style={{ background: tint }}
+                >
+                  {routeNumber}
+                </span>
+                <span className="flex-1 truncate text-sm font-medium text-neutral-100">
+                  {v.headsign ?? v.label ?? `Bus ${v.id}`}
+                </span>
+                <span className="text-[10px] text-neutral-500">
+                  {fmtAge(v.timestamp)}
+                </span>
+              </div>
+              <div className="mt-1.5 text-xs text-neutral-400">
+                {v.statusString ?? (
+                  <span className="italic text-neutral-500">En route</span>
+                )}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-neutral-500">
+                {speedKmh != null && <span>{speedKmh} km/h</span>}
+                {v.occupancy && (
+                  <span>{v.occupancy.replaceAll("_", " ").toLowerCase()}</span>
+                )}
+                {upcoming.length > 0 && !isOpen && (
+                  <span className="text-neutral-600">{upcoming.length} stops ahead</span>
+                )}
+              </div>
+            </button>
+
+            {isOpen && upcoming.length > 0 && (
+              <div className="border-t border-neutral-800/40 bg-neutral-900/30 px-4 py-2">
+                <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                  <MapPin size={10} className="mr-1 inline" />
+                  Next stops
+                </div>
+                <div className="space-y-0.5">
+                  {upcoming.map((stop, i) => (
+                    <div
+                      key={stop.id}
+                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs"
+                    >
+                      <span
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+                        style={{
+                          background: i === 0 ? tint : "#262626",
+                          color: i === 0 ? "#000" : "#a3a3a3",
+                        }}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-neutral-200">
+                        {stop.name}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-neutral-500">
+                        {stop.distanceStr}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         );
       })}
     </div>

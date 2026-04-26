@@ -452,6 +452,7 @@ export default function BusMap() {
         onFocusVehicle={(v) => {
           mapRef.current?.flyTo([v.lat, v.lon], 15, { duration: 0.8 });
         }}
+        stops={geometry?.stops}
       />
     )}
 
