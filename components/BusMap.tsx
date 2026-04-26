@@ -15,6 +15,7 @@ import {
 import L from "leaflet";
 import type { VehiclesResponse, Vehicle } from "@/lib/types";
 import { DeparturesPanel } from "./DeparturesPanel";
+import { RouteDetailPanel } from "./RouteDetailPanel";
 
 const CANBERRA_CENTER: [number, number] = [-35.3075, 149.1244];
 
@@ -208,6 +209,7 @@ export default function BusMap() {
   const [data, setData] = useState<VehiclesResponse | null>(null);
   const [basemap, setBasemap] = usePersistedBasemap();
   const [basemapOpen, setBasemapOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const searchParams = useSearchParams();
 
   const routesParam = searchParams.get("routes");
@@ -427,17 +429,36 @@ export default function BusMap() {
       </button>
     </div>
 
-    {/* Rendered outside MapContainer so Leaflet doesn't intercept scroll
-        or click events on the panel itself. */}
-    {singleRoute ? (
-      <DeparturesPanel route={singleRoute} color={geometry?.color ?? null} />
-    ) : (
-      data && (
-        <div className="pointer-events-none absolute bottom-3 left-1/2 z-[1000] -translate-x-1/2 rounded-full bg-neutral-900/90 px-3 py-1.5 text-xs text-neutral-300 shadow-lg backdrop-blur">
-          {data.vehicles.length} buses · updated{" "}
-          {new Date(data.fetchedAt).toLocaleTimeString()}
-        </div>
-      )
+    {/* Route detail side panel */}
+    {singleRoute && data && panelOpen && (
+      <RouteDetailPanel
+        route={{
+          number: singleRoute,
+          color: geometry?.color ?? null,
+          agency: geometry?.agency ?? null,
+        }}
+        color={geometry?.color ?? null}
+        vehicles={data.vehicles}
+        onClose={() => setPanelOpen(false)}
+      />
+    )}
+
+    {/* Bottom bar */}
+    {singleRoute && !panelOpen && (
+      <button
+        onClick={() => setPanelOpen(true)}
+        className="pointer-events-auto absolute bottom-3 left-3 right-3 z-[1000] mx-auto max-w-md rounded-2xl border border-neutral-800 bg-neutral-950/95 px-4 py-2.5 text-left shadow-2xl backdrop-blur"
+      >
+        <span className="text-xs text-neutral-300">
+          Tap for route details & departures
+        </span>
+      </button>
+    )}
+    {!singleRoute && data && (
+      <div className="pointer-events-none absolute bottom-3 left-1/2 z-[1000] -translate-x-1/2 rounded-full bg-neutral-900/90 px-3 py-1.5 text-xs text-neutral-300 shadow-lg backdrop-blur">
+        {data.vehicles.length} buses · updated{" "}
+        {new Date(data.fetchedAt).toLocaleTimeString()}
+      </div>
     )}
     </div>
   );
