@@ -20,23 +20,27 @@ const CANBERRA_CENTER: [number, number] = [-35.3075, 149.1244];
 
 type Basemap = "osm" | "satellite" | "hybrid" | "terrain";
 
-const BASEMAP_TILES: Record<Basemap, { url: string; attribution: string }> = {
+const BASEMAP_TILES: Record<Basemap, { url: string; attribution: string; subdomains: string[] }> = {
   osm: {
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    subdomains: ["a", "b", "c"],
   },
   satellite: {
-    url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    url: "https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
     attribution: "&copy; Google Maps",
+    subdomains: ["mt0", "mt1", "mt2", "mt3"],
   },
   hybrid: {
-    url: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+    url: "https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
     attribution: "&copy; Google Maps",
+    subdomains: ["mt0", "mt1", "mt2", "mt3"],
   },
   terrain: {
-    url: "https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}",
+    url: "https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}",
     attribution: "&copy; Google Maps",
+    subdomains: ["mt0", "mt1", "mt2", "mt3"],
   },
 };
 
@@ -261,6 +265,7 @@ export default function BusMap() {
       zoomControl={false}
     >
       <TileLayer
+        key={basemap}
         attribution={BASEMAP_TILES[basemap].attribution}
         url={
           basemap === "osm"
@@ -268,7 +273,7 @@ export default function BusMap() {
             : BASEMAP_TILES[basemap].url +
               (GOOGLE_KEY ? `&key=${GOOGLE_KEY}` : "")
         }
-        subdomains={basemap === "osm" ? ["a", "b", "c"] : undefined}
+        subdomains={BASEMAP_TILES[basemap].subdomains}
       />
 
       <AutoRefresh onData={setData} query={query} />
