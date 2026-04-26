@@ -116,13 +116,13 @@ function makeBusIcon(label: string, vehicle: Vehicle, highlight: boolean) {
     html: `<div class="bus-wrap" style="${ring}">
       <div class="bus-marker" style="background:${bg}">
         <span class="bus-label">${safeLabel}</span>
+        <div class="bus-tail" style="border-bottom-color:${bg};transform:rotate(${bearing}deg)"></div>
       </div>
-      <div class="bus-tail" style="border-top-color:${bg};transform:rotate(${bearing}deg)"></div>
       ${delayBadge}
     </div>`,
     className: "",
-    iconSize: [28, 40],
-    iconAnchor: [14, 36],
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
 }
 
