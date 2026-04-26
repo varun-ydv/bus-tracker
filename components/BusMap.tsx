@@ -96,17 +96,33 @@ function makeBusIcon(label: string, vehicle: Vehicle, highlight: boolean) {
       : "#a855f7");
   const safeLabel = label.length > 4 ? label.slice(0, 4) : label;
   const bearing = typeof vehicle.bearing === "number" ? vehicle.bearing : 0;
-  const ringStyle = highlight
-    ? "box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 0 0 5px rgba(0,0,0,.4);"
-    : "";
+
+  const delay = vehicle.delay ?? null;
+  let delayBadge = "";
+  if (delay != null) {
+    const m = Math.round(delay / 60);
+    if (Math.abs(m) < 1) {
+      delayBadge = `<span class="bus-delay on-time">on time</span>`;
+    } else if (m > 0) {
+      delayBadge = `<span class="bus-delay late">${m}m</span>`;
+    } else {
+      delayBadge = `<span class="bus-delay early">${Math.abs(m)}m</span>`;
+    }
+  }
+
+  const ring = highlight ? "box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 0 0 5px rgba(0,0,0,.4);" : "";
+
   return L.divIcon({
-    html: `<div class="bus-marker" style="background:${bg};${ringStyle}">
-      ${safeLabel}
-      <div class="bus-arrow" style="transform:rotate(${bearing}deg)"></div>
+    html: `<div class="bus-wrap" style="${ring}">
+      <div class="bus-marker" style="background:${bg}">
+        <span class="bus-label">${safeLabel}</span>
+      </div>
+      <div class="bus-tail" style="border-top-color:${bg};transform:rotate(${bearing}deg)"></div>
+      ${delayBadge}
     </div>`,
     className: "",
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+    iconSize: [28, 40],
+    iconAnchor: [14, 36],
   });
 }
 
