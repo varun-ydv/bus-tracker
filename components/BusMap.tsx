@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   CircleMarker,
@@ -17,6 +17,59 @@ import type { VehiclesResponse, Vehicle } from "@/lib/types";
 import { DeparturesPanel } from "./DeparturesPanel";
 
 const CANBERRA_CENTER: [number, number] = [-35.3075, 149.1244];
+
+type Basemap = "osm" | "satellite" | "hybrid" | "terrain";
+
+const BASEMAP_TILES: Record<Basemap, { url: string; attribution: string }> = {
+  osm: {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  },
+  satellite: {
+    url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    attribution: "&copy; Google Maps",
+  },
+  hybrid: {
+    url: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+    attribution: "&copy; Google Maps",
+  },
+  terrain: {
+    url: "https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}",
+    attribution: "&copy; Google Maps",
+  },
+};
+
+const BASEMAP_LABELS: Record<Basemap, string> = {
+  osm: "Map",
+  satellite: "Satellite",
+  hybrid: "Hybrid",
+  terrain: "Terrain",
+};
+
+const BASEMAP_ORDER: Basemap[] = ["osm", "satellite", "hybrid", "terrain"];
+
+const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
+
+function usePersistedBasemap(): [Basemap, (b: Basemap) => void] {
+  const [basemap, setBasemap] = useState<Basemap>(() => {
+    if (typeof window === "undefined") return "osm";
+    try {
+      const stored = localStorage.getItem("bus-tracker:basemap") as Basemap | null;
+      if (stored && stored in BASEMAP_TILES) return stored;
+    } catch {}
+    return "osm";
+  });
+
+  const set = (b: Basemap) => {
+    setBasemap(b);
+    try {
+      localStorage.setItem("bus-tracker:basemap", b);
+    } catch {}
+  };
+
+  return [basemap, set];
+}
 
 interface RouteGeometry {
   number: string;
@@ -99,6 +152,17 @@ function FitToBounds({
   return null;
 }
 
+function CloseOnMapClick({ onClose }: { onClose: () => void }) {
+  const map = useMap();
+  useEffect(() => {
+    map.on("click", onClose);
+    return () => {
+      map.off("click", onClose);
+    };
+  }, [map, onClose]);
+  return null;
+}
+
 /**
  * When exactly one route is selected in the URL, fetch its shape + stops and
  * draw the polyline + stop dots (AnyTrip-style).
@@ -138,6 +202,8 @@ function useRouteGeometry(routeNumber: string | null) {
 
 export default function BusMap() {
   const [data, setData] = useState<VehiclesResponse | null>(null);
+  const [basemap, setBasemap] = usePersistedBasemap();
+  const [basemapOpen, setBasemapOpen] = useState(false);
   const searchParams = useSearchParams();
 
   const routesParam = searchParams.get("routes");
@@ -184,6 +250,8 @@ export default function BusMap() {
     data?.vehicles.find((v) => v.routeShortName === singleRoute)?.routeColor ??
     "#06b6d4";
 
+  const closeBasemap = useCallback(() => setBasemapOpen(false), []);
+
   return (
     <div className="relative h-full w-full">
     <MapContainer
@@ -193,12 +261,19 @@ export default function BusMap() {
       zoomControl={false}
     >
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution={BASEMAP_TILES[basemap].attribution}
+        url={
+          basemap === "osm"
+            ? BASEMAP_TILES[basemap].url
+            : BASEMAP_TILES[basemap].url +
+              (GOOGLE_KEY ? `&key=${GOOGLE_KEY}` : "")
+        }
+        subdomains={basemap === "osm" ? ["a", "b", "c"] : undefined}
       />
 
       <AutoRefresh onData={setData} query={query} />
       <FitToBounds points={fitPoints} fitKey={fitKey} />
+      <CloseOnMapClick onClose={closeBasemap} />
 
       {/* Route shape — a thick coloured line with a dark halo underneath for
           contrast against the basemap. Rendered before markers so bus icons
@@ -301,6 +376,51 @@ export default function BusMap() {
       })}
 
     </MapContainer>
+
+    {/* Basemap layer picker — bottom-right floating button */}
+    <div className="absolute bottom-3 right-3 z-[1000] flex flex-col items-end gap-1.5">
+      {basemapOpen && (
+        <div className="flex flex-col gap-1 rounded-xl bg-neutral-900/90 p-1.5 shadow-lg backdrop-blur">
+          {BASEMAP_ORDER.map((b) => (
+            <button
+              key={b}
+              onClick={() => {
+                setBasemap(b);
+                setBasemapOpen(false);
+              }}
+              className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                basemap === b
+                  ? "bg-white text-neutral-900"
+                  : "text-neutral-300 hover:bg-neutral-800"
+              }`}
+            >
+              {BASEMAP_LABELS[b]}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={() => setBasemapOpen((o) => !o)}
+        className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-900/90 text-neutral-300 shadow-lg backdrop-blur hover:bg-neutral-800 hover:text-white"
+        title="Change basemap"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+          <line x1="8" y1="2" x2="8" y2="18" />
+          <line x1="16" y1="6" x2="16" y2="22" />
+        </svg>
+      </button>
+    </div>
 
     {/* Rendered outside MapContainer so Leaflet doesn't intercept scroll
         or click events on the panel itself. */}
