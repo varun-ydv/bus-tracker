@@ -2,7 +2,7 @@ import type { VehiclesResponse } from "@/lib/types";
 
 export function StatusBar({ data }: { data: VehiclesResponse | null }) {
   if (!data) return null;
-  const { canberra, nsw, anytrip } = data.providers;
+  const { canberra, nsw, anytrip, nextthere, transit } = data.providers;
 
   const dot = (
     configured: boolean,
@@ -19,6 +19,8 @@ export function StatusBar({ data }: { data: VehiclesResponse | null }) {
     { label: "ACT", count: canberra.count, ok: canberra.ok, configured: canberra.configured, error: canberra.error },
     { label: "NSW", count: nsw.count, ok: nsw.ok, configured: nsw.configured, error: nsw.error },
     { label: "AnyTrip", count: anytrip.count, ok: anytrip.ok, configured: anytrip.configured, error: anytrip.error },
+    { label: "NT", count: nextthere.count, ok: nextthere.ok, configured: nextthere.configured, error: nextthere.error },
+    { label: "Transit", count: transit.count, ok: transit.ok, configured: transit.configured, error: transit.error },
   ];
 
   return (

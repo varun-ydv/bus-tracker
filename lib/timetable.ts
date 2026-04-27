@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { transitConfigured, fetchTransitDepartures as getTransitDeparturesDirect } from "./transit";
 
 /**
  * Timetable service — answers "when does route X leave stop Y next?"
@@ -295,6 +296,7 @@ export function getDepartures(
 // ────────────────────────────────────────────────────────────────────────────
 
 const ANYTRIP_API_BASE = "https://api-cf-oc2.anytrip.com.au/api/v3/region/au2";
+const ANYTRIP_ACT_API_BASE = "https://api-cf-au9.anytrip.com.au/api/v3/region/au9";
 const ANYTRIP_USER_AGENT =
   process.env.ANYTRIP_USER_AGENT ??
   "Bus-tracker/1.0 (personal use; +https://github.com/)";
@@ -357,7 +359,8 @@ export async function getAnytripDepartures(
   const nowDate = opts.now ?? new Date();
   const nowUnix = Math.floor(nowDate.getTime() / 1000);
 
-  const url = new URL(`${ANYTRIP_API_BASE}/departures/${encodeURIComponent(stopId)}`);
+  const apiBase = routeGroupId.startsWith("au9:") ? ANYTRIP_ACT_API_BASE : ANYTRIP_API_BASE;
+  const url = new URL(`${apiBase}/departures/${encodeURIComponent(stopId)}`);
   url.searchParams.set("limit", String(nPrev + nNext + 10));
   url.searchParams.set("offset", String(-Math.max(nPrev + 2, 3)));
   url.searchParams.set("ts", String(nowUnix));
@@ -421,6 +424,68 @@ export async function getAnytripDepartures(
     },
     past,
     next,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transit App-backed departures — delegates to lib/transit.ts
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function getTransitDepartures(
+  routeShortName: string,
+  stop: { id: string; name: string; lat: number; lon: number },
+  opts: { nPrev?: number; nNext?: number; now?: Date } = {}
+): Promise<DeparturesResult | null> {
+  if (!transitConfigured()) return null;
+
+  const nowDate = opts.now ?? new Date();
+
+  const items = await getTransitDeparturesDirect(stop.lat, stop.lon, routeShortName);
+  if (!items || items.length === 0) return null;
+
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const toHhmm = (epochSec: number) => {
+    const d = new Date(epochSec * 1000);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  const toyyyymmdd = (d: Date) =>
+    `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
+
+  const past: Departure[] = [];
+  const next: Departure[] = [];
+
+  for (const item of items) {
+    const minutesFromNow = Math.round((item.departureTime * 1000 - nowDate.getTime()) / 60000);
+    const dep: Departure = {
+      tripId: item.tripId,
+      time: toHhmm(item.departureTime),
+      minutes: minutesFromNow,
+      date: toyyyymmdd(nowDate),
+      headsign: item.headsign ?? "",
+      direction: 0,
+      terminus: null,
+      terminusTime: null,
+      minutesFromNow,
+      delaySeconds: item.delaySeconds,
+      live: item.isRealTime,
+    };
+
+    if (minutesFromNow <= 0) {
+      past.push(dep);
+    } else {
+      next.push(dep);
+    }
+  }
+
+  past.sort((a, b) => b.minutesFromNow - a.minutesFromNow);
+  next.sort((a, b) => a.minutesFromNow - b.minutesFromNow);
+
+  return {
+    number: routeShortName,
+    stopId: stop.id,
+    now: { hhmm: toHhmm(Math.floor(nowDate.getTime() / 1000)), yyyymmdd: toyyyymmdd(nowDate), tz: "Australia/Sydney" },
+    past: past.slice(-(opts.nPrev ?? 3)),
+    next: next.slice(0, opts.nNext ?? 6),
   };
 }
 

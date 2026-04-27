@@ -143,9 +143,8 @@ function decodePolyline(str: string): [number, number][] {
 }
 
 /**
- * Known AnyTrip route-group ids for Qcity routes. (We could discover them
- * dynamically off the vehicles feed, but hard-coding the handful we care about
- * saves a round-trip when the user drills into a route with no live bus.)
+ * Known AnyTrip route-group ids for Qcity routes (NSW au2 region).
+ * Hard-coding saves a round-trip when the user drills into a route.
  *
  * Exported so the timetable layer can dispatch Qcity routes to AnyTrip's
  * /departures endpoint instead of looking for them in the ACT GTFS static.
@@ -163,6 +162,322 @@ export const ANYTRIP_ROUTE_GROUPS: Record<string, string> = {
   "844": "au2:buses:844:6015",
   "844X": "au2:buses:844X:6015",
 };
+
+/**
+ * AnyTrip route-group ids for ACT Transport Canberra routes (au9 region).
+ * Rapid routes 1-10 are prefixed with "R" in AnyTrip's au9 region.
+ * Regular routes use the same number.
+ *
+ * Maps the canonical route number (as used in the GTFS feed and UI) to the
+ * au9 route-group ID. This allows the departures API to request live/scheduled
+ * departures from AnyTrip for ACT routes.
+ */
+export const ANYTRIP_ACT_ROUTE_GROUPS: Record<string, string> = {
+  "1": "au9:lightrail:R1",
+  "2": "au9:buses:R2",
+  "3": "au9:buses:R3",
+  "4": "au9:buses:R4",
+  "5": "au9:buses:R5",
+  "6": "au9:buses:R6",
+  "7": "au9:buses:R7",
+  "8": "au9:buses:R8",
+  "9": "au9:buses:R9",
+  "10": "au9:buses:R10",
+  "18": "au9:buses:18",
+  "19": "au9:buses:19",
+  "20": "au9:buses:20",
+  "21": "au9:buses:21",
+  "22": "au9:buses:22",
+  "23": "au9:buses:23",
+  "24": "au9:buses:24",
+  "25": "au9:buses:25",
+  "26": "au9:buses:26",
+  "27": "au9:buses:27",
+  "28": "au9:buses:28",
+  "30": "au9:buses:30",
+  "31": "au9:buses:31",
+  "32": "au9:buses:32",
+  "40": "au9:buses:40",
+  "41": "au9:buses:41",
+  "42": "au9:buses:42",
+  "43": "au9:buses:43",
+  "44": "au9:buses:44",
+  "45": "au9:buses:45",
+  "46": "au9:buses:46",
+  "47": "au9:buses:47",
+  "50": "au9:buses:50",
+  "51": "au9:buses:51",
+  "52": "au9:buses:52",
+  "53": "au9:buses:53",
+  "54": "au9:buses:54",
+  "55": "au9:buses:55",
+  "56": "au9:buses:56",
+  "57": "au9:buses:57",
+  "58": "au9:buses:58",
+  "59": "au9:buses:59",
+  "60": "au9:buses:60",
+  "61": "au9:buses:61",
+  "62": "au9:buses:62",
+  "63": "au9:buses:63",
+  "64": "au9:buses:64",
+  "65": "au9:buses:65",
+  "66": "au9:buses:66",
+  "70": "au9:buses:70",
+  "71": "au9:buses:71",
+  "72": "au9:buses:72",
+  "73": "au9:buses:73",
+  "74": "au9:buses:74",
+  "75": "au9:buses:75",
+  "76": "au9:buses:76",
+  "77": "au9:buses:77",
+  "78": "au9:buses:78",
+  "79": "au9:buses:79",
+  "80": "au9:buses:80",
+  "81": "au9:buses:81",
+};
+
+/** AnyTrip API base URL for the ACT au9 region. */
+export const ANYTRIP_ACT_API_BASE =
+  "https://api-cf-au9.anytrip.com.au/api/v3/region/au9";
+
+/** The AnyTrip route name for a given ACT route number.
+ *  e.g. "2" → "R2", "30" → "30" */
+export function anytripActRouteName(routeNumber: string): string {
+  const rapid = parseInt(routeNumber, 10);
+  if (rapid >= 1 && rapid <= 10) return `R${routeNumber}`;
+  return routeNumber;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Dynamic AnyTrip route-group discovery
+// ────────────────────────────────────────────────────────────────────────────
+
+interface ATSearchResp {
+  response?: {
+    routeGroups?: Array<{
+      routeGroup?: {
+        id?: string;
+        name?: string;
+        longName?: string;
+        description?: string;
+      };
+    }>;
+  };
+}
+
+const routeGroupCache = new Map<string, string | null>();
+const ROUTE_GROUP_CACHE_TTL = 30 * 60 * 1000;
+const routeGroupCacheTimestamps = new Map<string, number>();
+
+/**
+ * Resolve a route short name to an AnyTrip route-group ID.
+ * Checks hardcoded mappings (Qcity au2 + ACT au9) first, then falls back to
+ * a live search against the AnyTrip search API (with caching).
+ *
+ * Returns null if no matching route group is found.
+ */
+export async function resolveAnytripRouteGroupId(
+  routeNumber: string
+): Promise<string | null> {
+  // Check hardcoded Qcity (au2) routes first
+  const qcity = ANYTRIP_ROUTE_GROUPS[routeNumber];
+  if (qcity) return qcity;
+
+  // Check hardcoded ACT (au9) routes
+  const act = ANYTRIP_ACT_ROUTE_GROUPS[routeNumber];
+  if (act) return act;
+
+  const now = Date.now();
+  const ts = routeGroupCacheTimestamps.get(routeNumber);
+  if (ts !== undefined && now - ts < ROUTE_GROUP_CACHE_TTL) {
+    return routeGroupCache.get(routeNumber) ?? null;
+  }
+
+  const headers = {
+    "User-Agent": ANYTRIP_USER_AGENT,
+    Accept: "application/json",
+  };
+
+  const saveResult = (id: string | null) => {
+    routeGroupCache.set(routeNumber, id);
+    routeGroupCacheTimestamps.set(routeNumber, now);
+    return id;
+  };
+
+  try {
+    // Try ACT au9 region search first
+    const res1 = await fetch(
+      `${ANYTRIP_ACT_API_BASE}/search?query=${encodeURIComponent(anytripActRouteName(routeNumber))}&limit=5`,
+      { headers, cache: "no-store" }
+    );
+    if (res1.ok) {
+      const json = (await res1.json()) as ATSearchResp;
+      const candidates = json.response?.routeGroups ?? [];
+      const atName = anytripActRouteName(routeNumber);
+      const match = candidates.find(
+        (c) => c.routeGroup?.name === atName
+      );
+      if (match?.routeGroup?.id) {
+        return saveResult(match.routeGroup.id);
+      }
+    }
+
+    // Then try NSW au2 region search
+    const res2 = await fetch(
+      `${ANYTRIP_API_BASE}/search?query=${encodeURIComponent(routeNumber)}&limit=15`,
+      { headers, cache: "no-store" }
+    );
+    if (res2.ok) {
+      const json = (await res2.json()) as ATSearchResp;
+      const candidates = json.response?.routeGroups ?? [];
+      const match = candidates.find(
+        (c) => c.routeGroup?.name === routeNumber
+      );
+      if (match?.routeGroup?.id) {
+        return saveResult(match.routeGroup.id);
+      }
+    }
+
+    return saveResult(null);
+  } catch {
+    return saveResult(null);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AnyTrip stop-name enrichment
+// ────────────────────────────────────────────────────────────────────────────
+
+interface ATStopDetailResp {
+  response?: {
+    stop?: {
+      id?: string;
+      fullName?: string;
+      name?: {
+        station_readable_name?: string;
+        station_name?: string;
+        platform_readable_name?: string;
+        platform_name?: string;
+        platform_type?: string;
+      };
+      disassembled?: {
+        fullName?: string;
+        stationName?: string;
+        platformCombinedName?: string;
+      };
+    };
+  };
+}
+
+const stopNameCache = new Map<string, string | null>();
+
+/**
+ * Look up richer stop metadata from AnyTrip for a single GTFS stop ID.
+ * Tries the ACT au9 region first (for Transport Canberra stops), then falls
+ * back to the NSW au2 region (for shared stops like Qcity interchanges).
+ *
+ * Returns the enriched full name (e.g. "Westfield Belconnen, Platform 2, Set Down Only")
+ * or null if the stop isn't known to AnyTrip.
+ */
+async function lookupAnytripStopName(
+  gtfsStopId: string
+): Promise<string | null> {
+  if (stopNameCache.has(gtfsStopId)) return stopNameCache.get(gtfsStopId)!;
+
+  const headers = {
+    "User-Agent": ANYTRIP_USER_AGENT,
+    Accept: "application/json",
+  };
+
+  const extractName = (json: ATStopDetailResp): string | null => {
+    const stop = json.response?.stop;
+    return (
+      stop?.disassembled?.fullName ??
+      stop?.fullName ??
+      stop?.name?.platform_readable_name ??
+      stop?.name?.station_readable_name ??
+      null
+    );
+  };
+
+  try {
+    // Try ACT au9 region first
+    const au9Id = `au9:${gtfsStopId}`;
+    const res9 = await fetch(
+      `${ANYTRIP_ACT_API_BASE}/stop/${encodeURIComponent(au9Id)}`,
+      { headers, cache: "no-store" }
+    );
+    if (res9.ok) {
+      const json = (await res9.json()) as ATStopDetailResp;
+      const name = extractName(json);
+      if (name) {
+        stopNameCache.set(gtfsStopId, name);
+        return name;
+      }
+    }
+
+    // Fall back to NSW au2 region
+    const au2Id = `au2:${gtfsStopId}`;
+    const res2 = await fetch(
+      `${ANYTRIP_API_BASE}/stop/${encodeURIComponent(au2Id)}`,
+      { headers, cache: "no-store" }
+    );
+    if (res2.ok) {
+      const json = (await res2.json()) as ATStopDetailResp;
+      const name = extractName(json);
+      if (name) {
+        stopNameCache.set(gtfsStopId, name);
+        return name;
+      }
+    }
+
+    stopNameCache.set(gtfsStopId, null);
+    return null;
+  } catch {
+    stopNameCache.set(gtfsStopId, null);
+    return null;
+  }
+}
+
+/**
+ * Batch-enrich stop names using AnyTrip's stop metadata.
+ * Returns a map from GTFS stop ID to the enriched name.
+ * Stops that can't be resolved are omitted from the map.
+ */
+export async function enrichStopNamesFromAnytrip(
+  stopIds: string[]
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const uncached: string[] = [];
+  for (const id of stopIds) {
+    if (stopNameCache.has(id)) {
+      const cached = stopNameCache.get(id);
+      if (cached) result.set(id, cached);
+    } else {
+      uncached.push(id);
+    }
+  }
+  if (uncached.length === 0) return result;
+
+  // Fetch up to 20 stops concurrently to avoid overwhelming the API
+  const batchSize = 20;
+  for (let i = 0; i < uncached.length; i += batchSize) {
+    const batch = uncached.slice(i, i + batchSize);
+    const settled = await Promise.allSettled(
+      batch.map(async (id) => {
+        const name = await lookupAnytripStopName(id);
+        if (name) return { id, name };
+        return null;
+      })
+    );
+    for (const r of settled) {
+      if (r.status === "fulfilled" && r.value) {
+        result.set(r.value.id, r.value.name);
+      }
+    }
+  }
+  return result;
+}
 
 interface AnytripCacheEntry { data: RouteGeometry; at: number }
 const anytripCache = new Map<string, AnytripCacheEntry>();

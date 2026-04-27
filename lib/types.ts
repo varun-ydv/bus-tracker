@@ -1,4 +1,7 @@
-export type Provider = "canberra" | "nsw" | "anytrip" | "nextthere";
+export type Provider = "canberra" | "nsw" | "anytrip" | "nextthere" | "transit";
+
+export type TimingProvider = "auto" | Provider;
+export type VehicleProviderFilter = Provider | "all";
 
 export interface Vehicle {
   id: string;

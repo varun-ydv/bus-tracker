@@ -24,20 +24,20 @@ export interface FavouriteRoute {
 }
 
 export const FAVOURITE_ROUTES: FavouriteRoute[] = [
-  { number: "1", providers: ["canberra", "nextthere"], label: "1 · R1", aliases: ["r1"] },
-  { number: "2", providers: ["canberra", "nextthere"], label: "2 · R2", aliases: ["r2"] },
-  { number: "3", providers: ["canberra", "nextthere"], label: "3 · R3", aliases: ["r3"] },
-  { number: "4", providers: ["canberra", "nextthere"], label: "4 · R4", aliases: ["r4"] },
-  { number: "5", providers: ["canberra", "nextthere"], label: "5 · R5", aliases: ["r5"] },
-  { number: "6", providers: ["canberra", "nextthere"], label: "6 · R6", aliases: ["r6"] },
-  { number: "7", providers: ["canberra", "nextthere"], label: "7 · R7", aliases: ["r7"] },
-  { number: "8", providers: ["canberra", "nextthere"], label: "8 · R8", aliases: ["r8"] },
-  { number: "9", providers: ["canberra", "nextthere"], label: "9 · R9", aliases: ["r9"] },
-  { number: "10", providers: ["canberra", "nextthere"], label: "10 · R10", aliases: ["r10"] },
-  { number: "31", providers: ["canberra", "nextthere"] },
-  { number: "50", providers: ["canberra", "nextthere"] },
-  { number: "51", providers: ["canberra", "nextthere"] },
-  { number: "53", providers: ["canberra", "nextthere"] },
+  { number: "1", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "1 · R1", aliases: ["r1"] },
+  { number: "2", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "2 · R2", aliases: ["r2"] },
+  { number: "3", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "3 · R3", aliases: ["r3"] },
+  { number: "4", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "4 · R4", aliases: ["r4"] },
+  { number: "5", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "5 · R5", aliases: ["r5"] },
+  { number: "6", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "6 · R6", aliases: ["r6"] },
+  { number: "7", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "7 · R7", aliases: ["r7"] },
+  { number: "8", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "8 · R8", aliases: ["r8"] },
+  { number: "9", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "9 · R9", aliases: ["r9"] },
+  { number: "10", providers: ["canberra", "nextthere", "transit", "anytrip"], label: "10 · R10", aliases: ["r10"] },
+  { number: "31", providers: ["canberra", "nextthere", "transit", "anytrip"], agencyContains: "transport canberra" },
+  { number: "50", providers: ["canberra", "nextthere", "transit", "anytrip"], agencyContains: "transport canberra" },
+  { number: "51", providers: ["canberra", "nextthere", "transit", "anytrip"], agencyContains: "transport canberra" },
+  { number: "53", providers: ["canberra", "nextthere", "transit", "anytrip"], agencyContains: "transport canberra" },
   { number: "830", providers: ["anytrip", "nextthere"], agencyContains: "qcity" },
   { number: "831", providers: ["anytrip", "nextthere"], agencyContains: "qcity" },
 ];
@@ -85,18 +85,18 @@ export interface Place {
 
 /** ACT-side places: match ACT buses + Qcity buses only (no other Sydney/regional AnyTrip). */
 const ACT_SCOPE: Place["providerScope"] = {
-  providers: ["canberra", "anytrip", "nextthere"],
-  anytripAgencies: ["qcity"],
+  providers: ["canberra", "anytrip", "nextthere", "transit"],
+  anytripAgencies: ["qcity", "transport canberra"],
 };
 /** Queanbeyan: Qcity only (ACT feed doesn't cover NSW). */
 const QCITY_SCOPE: Place["providerScope"] = {
-  providers: ["anytrip", "nextthere"],
+  providers: ["anytrip", "nextthere", "transit"],
   anytripAgencies: ["qcity"],
 };
 
 const act = (number: string): PlaceRoute => ({
   number,
-  providers: ["canberra", "nextthere"],
+  providers: ["canberra", "nextthere", "transit", "anytrip"],
 });
 const acts = (...nums: string[]): PlaceRoute[] => nums.map(act);
 const qcity = (number: string): PlaceRoute => ({
@@ -264,11 +264,18 @@ export function vehicleMatchesAny(
   const short = (vehicle.routeShortName ?? vehicle.routeId ?? "").toLowerCase();
   if (!short) return false;
   return favourites.some((f) => {
-    if (f.number.toLowerCase() !== short) return false;
+    let fNum = f.number.toLowerCase();
+    // Normalise AnyTrip's "R2" prefix to match our canonical "2"
+    const normalise = (s: string) => s.replace(/^r(\d+)$/, "$1");
+    if (normalise(fNum) !== normalise(short)) return false;
     if (f.providers && !f.providers.includes(vehicle.provider)) return false;
     if (f.agencyContains) {
-      const ag = (vehicle.agency ?? "").toLowerCase();
-      if (!ag.includes(f.agencyContains.toLowerCase())) return false;
+      // Only enforce agency filter for providers that set the agency field.
+      // Canberra GTFS-RT vehicles have agency=null, so skip the check for them.
+      if (vehicle.agency != null) {
+        const ag = vehicle.agency.toLowerCase();
+        if (!ag.includes(f.agencyContains.toLowerCase())) return false;
+      }
     }
     return true;
   });

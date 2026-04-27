@@ -7,6 +7,7 @@ const PROVIDER_BADGE: Record<Vehicle["provider"], string> = {
   nsw: "NSW",
   anytrip: "AT",
   nextthere: "NT",
+  transit: "TR",
 };
 
 export function BusCard({ vehicle }: { vehicle: Vehicle }) {
@@ -30,6 +31,10 @@ export function BusCard({ vehicle }: { vehicle: Vehicle }) {
       ? "#06b6d4"
       : vehicle.provider === "nsw"
       ? "#f97316"
+      : vehicle.provider === "nextthere"
+      ? "#10b981"
+      : vehicle.provider === "transit"
+      ? "#3b82f6"
       : "#a855f7");
 
   return (

@@ -10,15 +10,27 @@ import {
   Route as RouteIcon,
   Search,
   ArrowRight,
+  RadioTower,
 } from "lucide-react";
 import { FAVOURITE_ROUTES, PLACES } from "@/lib/favourites";
+import type { VehicleProviderFilter } from "@/lib/types";
 
 export interface QuickFiltersState {
   /** selected route short names; empty set = all (no route filter) */
   routes: Set<string>;
   /** selected place id, or null */
   place: string | null;
+  /** live vehicle source; Transit is excluded because it has no vehicle feed */
+  provider: VehicleProviderFilter;
 }
+
+const VEHICLE_PROVIDERS: Array<{ id: VehicleProviderFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "canberra", label: "ACT" },
+  { id: "nsw", label: "NSW" },
+  { id: "anytrip", label: "AnyTrip" },
+  { id: "nextthere", label: "NextThere" },
+];
 
 /** Normalise free-text input into a canonical route number.
  *   "r2" / "R2"        → "2"       (via FAVOURITE_ROUTES alias)
@@ -85,12 +97,25 @@ export function QuickFilters({
   const submitQuery = () => {
     const n = normaliseQuery(query);
     if (!n) return;
-    router.push(`/map?routes=${encodeURIComponent(n)}`);
+    router.push(routeMapHref(n));
+  };
+
+  const routeMapHref = (route: string) => {
+    // Use R-prefixed name for rapid routes 1-10 in the URL
+    const urlRoute = (() => {
+      const num = parseInt(route, 10);
+      if (!isNaN(num) && num >= 1 && num <= 10) return `R${route}`;
+      return route;
+    })();
+    const params = new URLSearchParams({ routes: urlRoute });
+    return `/map?${params.toString()}`;
   };
 
   const setRoutes = (routes: Set<string>) =>
     onChange({ ...state, routes });
   const setPlace = (place: string | null) => onChange({ ...state, place });
+  const setProvider = (provider: VehicleProviderFilter) =>
+    onChange({ ...state, provider });
 
   const toggleRoute = (num: string) => {
     const next = new Set(state.routes);
@@ -154,7 +179,7 @@ export function QuickFilters({
             {suggestions.map((s) => (
               <li key={s.number}>
                 <Link
-                  href={`/map?routes=${encodeURIComponent(s.number)}`}
+                  href={routeMapHref(s.number)}
                   prefetch={false}
                   onClick={() => setQuery("")}
                   className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
@@ -171,6 +196,29 @@ export function QuickFilters({
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Route chips header */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-neutral-400">
+          <RadioTower size={12} />
+          Live source
+        </div>
+        <div className="flex gap-1 overflow-x-auto rounded-lg bg-neutral-900/60 p-1">
+          {VEHICLE_PROVIDERS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setProvider(p.id)}
+              className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+                state.provider === p.id
+                  ? "bg-neutral-100 text-neutral-900"
+                  : "text-neutral-400 hover:text-neutral-100"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Route chips header */}
@@ -221,7 +269,7 @@ export function QuickFilters({
                 {r.label ?? r.number}
               </button>
               <Link
-                href={`/map?routes=${encodeURIComponent(r.number)}`}
+                href={routeMapHref(r.number)}
                 prefetch={false}
                 aria-label={`Track route ${r.number} on map`}
                 className={`flex items-center border-l px-1.5 transition ${

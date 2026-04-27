@@ -110,6 +110,47 @@ NSW_API_KEY=your_key_here
           </ol>
         </div>
 
+        <div className="rounded-xl border border-blue-900/40 bg-blue-950/10 p-4">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
+            Transit App API (global live departures)
+          </h2>
+          <p className="mt-2 text-sm text-neutral-300">
+            Transit provides real-time departure times and live vehicle positions
+            for routes worldwide, including Canberra and Queanbeyan. Select
+            &quot;Transit&quot; in the timing source picker to use it for
+            departures, or leave on &quot;Auto&quot; to use the best available
+            source per route.
+          </p>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Free tier: 1,500 calls/month, 5 calls/min. The app caches
+            aggressively to stay within quota.
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-neutral-300">
+            <li>
+              Request access at{" "}
+              <a
+                className="text-blue-400 underline"
+                href="https://transitapp.com/partners/apis"
+                target="_blank"
+              >
+                transitapp.com/partners/apis
+                <ExternalLink size={10} className="ml-0.5 inline" />
+              </a>
+            </li>
+            <li>
+              Add to <code className="rounded bg-neutral-900 px-1">.env.local</code>:
+              <pre className="mt-1 overflow-x-auto rounded bg-neutral-950 p-2 text-[11px]">
+TRANSIT_API_KEY=your_key_here
+              </pre>
+            </li>
+          </ol>
+          <p className="mt-2 text-[10px] text-neutral-500">
+            Per Transit&apos;s Terms of Service, the &quot;Powered by
+            Transit&quot; attribution is displayed when Transit data is shown.
+          </p>
+        </div>
+
         <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm text-neutral-400">
           <p className="font-semibold text-neutral-200">After adding keys:</p>
           <ol className="mt-1 list-decimal pl-5">

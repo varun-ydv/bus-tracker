@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CircleMarker,
   MapContainer,
@@ -13,9 +13,10 @@ import {
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
-import type { VehiclesResponse, Vehicle } from "@/lib/types";
-import { DeparturesPanel } from "./DeparturesPanel";
+import type { TimingProvider, VehiclesResponse, Vehicle } from "@/lib/types";
 import { RouteDetailPanel } from "./RouteDetailPanel";
+import { StopDetailPanel } from "./StopDetailPanel";
+import type { RouteStop } from "@/lib/routes";
 
 const CANBERRA_CENTER: [number, number] = [-35.3075, 149.1244];
 
@@ -53,6 +54,14 @@ const BASEMAP_LABELS: Record<Basemap, string> = {
 };
 
 const BASEMAP_ORDER: Basemap[] = ["osm", "satellite", "hybrid", "terrain"];
+const TIMING_PROVIDERS = new Set<TimingProvider>([
+  "auto",
+  "canberra",
+  "nsw",
+  "anytrip",
+  "nextthere",
+  "transit",
+]);
 
 const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
 
@@ -93,6 +102,8 @@ function makeBusIcon(label: string, vehicle: Vehicle, highlight: boolean) {
       ? "#f97316"
       : vehicle.provider === "nextthere"
       ? "#10b981"
+      : vehicle.provider === "transit"
+      ? "#3b82f6"
       : "#a855f7");
   const safeLabel = label.length > 4 ? label.slice(0, 4) : label;
   const bearing = typeof vehicle.bearing === "number" ? vehicle.bearing : 0;
@@ -236,6 +247,7 @@ function CaptureMap({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }
 }
 
 export default function BusMap() {
+  const router = useRouter();
   const [data, setData] = useState<VehiclesResponse | null>(null);
   const [basemap, setBasemap] = usePersistedBasemap();
   const [basemapOpen, setBasemapOpen] = useState(false);
@@ -244,6 +256,8 @@ export default function BusMap() {
 
   const routesParam = searchParams.get("routes");
   const placeParam = searchParams.get("place");
+  const providerParam = searchParams.get("provider");
+  const timingParam = searchParams.get("timing");
 
   const singleRoute = useMemo(() => {
     if (placeParam) return null;
@@ -257,13 +271,47 @@ export default function BusMap() {
   }, [routesParam, placeParam]);
 
   const [panelOpen, setPanelOpen] = useState(!!singleRoute);
+  const [selectedStop, setSelectedStop] = useState<RouteStop | null>(null);
 
   const query = useMemo(() => {
     const p = new URLSearchParams();
     if (routesParam) p.set("routes", routesParam);
     if (placeParam) p.set("place", placeParam);
+    if (providerParam) p.set("provider", providerParam);
     return p.toString();
-  }, [routesParam, placeParam]);
+  }, [routesParam, placeParam, providerParam]);
+
+  const [timingProvider, setTimingProviderState] = useState<TimingProvider>(() => {
+    if (typeof window === "undefined") return "auto";
+    try {
+      const stored = localStorage.getItem("bus-tracker:timing-provider");
+      if (stored && TIMING_PROVIDERS.has(stored as TimingProvider)) {
+        return stored as TimingProvider;
+      }
+    } catch {}
+    return "auto";
+  });
+
+  useEffect(() => {
+    if (timingParam && TIMING_PROVIDERS.has(timingParam as TimingProvider)) {
+      setTimingProviderState(timingParam as TimingProvider);
+    }
+  }, [timingParam]);
+
+  const setTimingProvider = useCallback(
+    (provider: TimingProvider) => {
+      setTimingProviderState(provider);
+      try {
+        localStorage.setItem("bus-tracker:timing-provider", provider);
+      } catch {}
+      const params = new URLSearchParams(searchParams.toString());
+      if (provider === "auto") params.delete("timing");
+      else params.set("timing", provider);
+      const qs = params.toString();
+      router.replace(qs ? `/map?${qs}` : "/map", { scroll: false });
+    },
+    [router, searchParams]
+  );
 
   const geometry = useRouteGeometry(singleRoute);
 
@@ -283,7 +331,10 @@ export default function BusMap() {
 
   const highlightColor =
     geometry?.color ??
-    data?.vehicles.find((v) => v.routeShortName === singleRoute)?.routeColor ??
+    data?.vehicles.find((v) => {
+      const normalise = (s: string) => s.replace(/^r(\d+)$/i, "$1");
+      return normalise(v.routeShortName ?? v.routeId ?? "") === normalise(singleRoute ?? "");
+    })?.routeColor ??
     "#06b6d4";
 
   const closeBasemap = useCallback(() => setBasemapOpen(false), []);
@@ -311,7 +362,7 @@ export default function BusMap() {
       <AutoRefresh onData={setData} query={query} />
       <FitToBounds points={fitPoints} fitKey={fitKey} />
       <CaptureMap mapRef={mapRef} />
-      <CloseOnMapClick onClose={closeBasemap} />
+      <CloseOnMapClick onClose={() => { closeBasemap(); setSelectedStop(null); }} />
 
       {/* Route shape — a thick coloured line with a dark halo underneath for
           contrast against the basemap. Rendered before markers so bus icons
@@ -341,31 +392,64 @@ export default function BusMap() {
         />
       ))}
 
-      {/* Stop dots — small circles along the route. Click to see stop name. */}
-      {geometry?.stops.map((stop) => (
-        <CircleMarker
-          key={stop.id}
-          center={[stop.lat, stop.lon]}
-          radius={4}
-          pathOptions={{
-            color: "#0a0a0a",
-            weight: 1.5,
-            fillColor: "#ffffff",
-            fillOpacity: 1,
-          }}
-        >
-          <Tooltip direction="top" offset={[0, -4]} opacity={0.95}>
-            {stop.name}
-          </Tooltip>
-        </CircleMarker>
-      ))}
+      {/* Stop dots — tappable circles along the route. Click to see stop details. */}
+      {geometry?.stops.map((stop) => {
+        const isSelected = selectedStop?.id === stop.id;
+        return (
+          <Fragment key={stop.id}>
+            {/* Invisible larger hit area for easier tapping */}
+            <CircleMarker
+              center={[stop.lat, stop.lon]}
+              radius={14}
+              pathOptions={{
+                color: "transparent",
+                weight: 0,
+                fillColor: "transparent",
+                fillOpacity: 0,
+                interactive: true,
+                bubblingMouseEvents: false,
+              }}
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  setSelectedStop({ id: stop.id, name: stop.name, lat: stop.lat, lon: stop.lon });
+                },
+              }}
+            />
+            {/* Visible stop dot */}
+            <CircleMarker
+              center={[stop.lat, stop.lon]}
+              radius={isSelected ? 9 : 6}
+              pathOptions={{
+                color: isSelected ? highlightColor : "#334155",
+                weight: isSelected ? 3 : 2,
+                fillColor: isSelected ? highlightColor : "#ffffff",
+                fillOpacity: 1,
+                className: "cursor-pointer",
+              }}
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  setSelectedStop({ id: stop.id, name: stop.name, lat: stop.lat, lon: stop.lon });
+                },
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
+                {stop.name}
+              </Tooltip>
+            </CircleMarker>
+          </Fragment>
+        );
+      })}
 
       {/* Live vehicles. In single-route mode we highlight them; in multi mode
           they're rendered normally. */}
       {data?.vehicles.map((v) => {
+        const normalise = (s: string) => s.replace(/^r(\d+)$/i, "$1");
+        const vRoute = normalise(v.routeShortName ?? v.routeId ?? "");
         const highlight =
           !!singleRoute &&
-          (v.routeShortName === singleRoute || v.routeId === singleRoute);
+          (vRoute === normalise(singleRoute));
         return (
           <Marker
             key={`${v.provider}-${v.id}`}
@@ -395,6 +479,8 @@ export default function BusMap() {
                       ? "Transport NSW"
                       : v.provider === "nextthere"
                       ? "NextThere"
+                      : v.provider === "transit"
+                      ? "Transit App"
                       : "AnyTrip")}
                   {v.label && ` · #${v.label}`}
                 </div>
@@ -471,7 +557,7 @@ export default function BusMap() {
     </div>
 
     {/* Route detail side panel */}
-    {singleRoute && data && panelOpen && (
+    {singleRoute && data && panelOpen && !selectedStop && (
       <RouteDetailPanel
         route={{
           number: singleRoute,
@@ -485,6 +571,27 @@ export default function BusMap() {
           mapRef.current?.flyTo([v.lat, v.lon], 15, { duration: 0.8 });
         }}
         stops={geometry?.stops}
+        timingProvider={timingProvider}
+        onTimingProviderChange={setTimingProvider}
+      />
+    )}
+
+    {/* Stop detail side panel */}
+    {singleRoute && selectedStop && (
+      <StopDetailPanel
+        routeNumber={singleRoute}
+        stop={selectedStop}
+        color={geometry?.color ?? null}
+        timingProvider={timingProvider}
+        onTimingProviderChange={setTimingProvider}
+        onSelectRoute={(routeNumber) => {
+          setSelectedStop(null);
+          const params = new URLSearchParams(searchParams.toString());
+          params.set("routes", routeNumber);
+          router.replace(`/map?${params.toString()}`, { scroll: false });
+        }}
+        onBack={() => setSelectedStop(null)}
+        onClose={() => setSelectedStop(null)}
       />
     )}
 

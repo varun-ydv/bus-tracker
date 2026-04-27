@@ -1,6 +1,7 @@
 "use client";
 
 import { Search, X } from "lucide-react";
+import type { VehicleProviderFilter } from "@/lib/types";
 
 export function FilterBar({
   filter,
@@ -10,15 +11,23 @@ export function FilterBar({
 }: {
   filter: string;
   onFilterChange: (s: string) => void;
-  provider: "all" | "canberra" | "nsw" | "anytrip";
-  onProviderChange: (p: "all" | "canberra" | "nsw" | "anytrip") => void;
+  provider: VehicleProviderFilter;
+  onProviderChange: (p: VehicleProviderFilter) => void;
 }) {
-  const PROVIDERS = ["all", "canberra", "nsw", "anytrip"] as const;
+  const PROVIDERS: VehicleProviderFilter[] = [
+    "all",
+    "canberra",
+    "nsw",
+    "anytrip",
+    "nextthere",
+  ];
   const LABEL = {
     all: "All",
     canberra: "ACT",
     nsw: "NSW",
     anytrip: "AnyTrip",
+    nextthere: "NextThere",
+    transit: "Transit",
   } as const;
   return (
     <div className="space-y-2">

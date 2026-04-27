@@ -3,6 +3,7 @@ import { canberraConfigured, fetchCanberraVehicles } from "@/lib/canberra";
 import { nswConfigured, fetchNswVehicles } from "@/lib/nsw";
 import { anytripConfigured, fetchAnytripVehicles } from "@/lib/anytrip";
 import { nextthereConfigured, fetchNextthereVehicles } from "@/lib/nextthere";
+import { transitConfigured, fetchTransitVehicles } from "@/lib/transit";
 import { distanceMeters } from "@/lib/gtfs";
 import {
   findPlace,
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
       nsw: { ok: false, count: 0, configured: nswConfigured() },
       anytrip: { ok: false, count: 0, configured: anytripConfigured() },
       nextthere: { ok: false, count: 0, configured: nextthereConfigured() },
+      transit: { ok: false, count: 0, configured: transitConfigured() },
     },
     fetchedAt: Date.now(),
   };
@@ -101,30 +103,52 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  await Promise.all(tasks);
-
-  // De-duplicate: AnyTrip and the direct NSW feed both surface most Sydney
-  // buses. Prefer AnyTrip records (they include agency, headsign, route color
-  // and a human-readable status) when the same fleet vehicle appears in both.
-  const byKey = new Map<string, Vehicle>();
-  const priority: Record<Vehicle["provider"], number> = {
-    anytrip: 4,
-    nextthere: 3,
-    canberra: 2,
-    nsw: 1,
-  };
-  for (const v of response.vehicles) {
-    if (!v.label) {
-      byKey.set(`${v.provider}:${v.id}`, v);
-      continue;
-    }
-    const key = `vid:${v.label}`;
-    const existing = byKey.get(key);
-    if (!existing || priority[v.provider] > priority[existing.provider]) {
-      byKey.set(key, v);
+  if (!providerFilter || providerFilter === "transit") {
+    if (transitConfigured()) {
+      tasks.push(
+        fetchTransitVehicles()
+          .then((v) => {
+            response.vehicles.push(...v);
+            response.providers.transit.ok = true;
+            response.providers.transit.count = v.length;
+          })
+          .catch((e: Error) => {
+            response.providers.transit.error = e.message;
+          })
+      );
     }
   }
-  let filtered: Vehicle[] = Array.from(byKey.values());
+
+  await Promise.all(tasks);
+
+  // De-duplicate: multiple providers may surface the same physical bus.
+  // Higher priority wins when the same fleet vehicle appears in both.
+  // Skip dedup when a specific provider is requested — show raw per-provider data.
+  let filtered: Vehicle[];
+  if (providerFilter) {
+    filtered = response.vehicles;
+  } else {
+    const byKey = new Map<string, Vehicle>();
+    const priority: Record<Vehicle["provider"], number> = {
+      anytrip: 5,
+      nextthere: 4,
+      transit: 3,
+      canberra: 2,
+      nsw: 1,
+    };
+    for (const v of response.vehicles) {
+      if (!v.label) {
+        byKey.set(`${v.provider}:${v.id}`, v);
+        continue;
+      }
+      const key = `vid:${v.label}`;
+      const existing = byKey.get(key);
+      if (!existing || priority[v.provider] > priority[existing.provider]) {
+        byKey.set(key, v);
+      }
+    }
+    filtered = Array.from(byKey.values());
+  }
 
   // A place filter (when set) replaces the route filter: selecting a place
   // means "everything that has to do with this interchange" — routes that

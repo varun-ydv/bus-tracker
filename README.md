@@ -9,7 +9,8 @@ Personal live bus tracker for **Canberra (ACT)** and **Queanbeyan (NSW)** region
 
 ## Features
 
-- Live bus positions from **Transport Canberra** + **Transport NSW** (Qcity Transit)
+- Live bus positions from **Transport Canberra**, **Transport NSW**, **AnyTrip**, and **NextThere**
+- Optional **Transit API** timing source for on-demand stop departures
 - **List view** — scrollable cards sorted by route
 - **Map view** — live dots on OpenStreetMap, auto-centers to fit
 - **Filter** by route number, provider, or both
@@ -24,13 +25,16 @@ Browser (React + Leaflet)
        ↕ /api/vehicles
 Next.js API route (server)   ← API keys live here
        ↕ GTFS-RT protobuf
-┌──────────────────┬──────────────────┐
-│ Transport        │ Transport NSW    │
-│ Canberra (ACT)   │ (Qcity / NSW)    │
-└──────────────────┴──────────────────┘
+┌──────────────────┬──────────────────┬─────────────────────┐
+│ Transport        │ Transport NSW    │ AnyTrip / NextThere │
+│ Canberra (ACT)   │ (NSW / regional) │ Qcity + ACT overlays │
+└──────────────────┴──────────────────┴─────────────────────┘
+       ↕ Transit API (on-demand departures only)
 ```
 
-Both endpoints return **GTFS-Realtime protobuf** — decoded server-side with `gtfs-realtime-bindings` and served to the client as clean JSON.
+Official ACT/NSW vehicle feeds return **GTFS-Realtime protobuf** — decoded
+server-side with `gtfs-realtime-bindings` and served to the client as clean
+JSON. Aggregator APIs are normalised into the same app-facing shape.
 
 ## Project structure
 
@@ -54,7 +58,8 @@ Bus-tracker/
 │   ├── types.ts                  # Vehicle + response types
 │   ├── gtfs.ts                   # protobuf decoder + haversine
 │   ├── canberra.ts               # Transport Canberra client
-│   └── nsw.ts                    # Transport NSW client
+│   ├── nsw.ts                    # Transport NSW client
+│   └── transit.ts                # Transit API departures client
 ├── public/
 │   ├── manifest.json             # PWA manifest
 │   ├── icon.svg / 192 / 512
@@ -105,6 +110,18 @@ Add to `.env.local`:
 
 ```bash
 NSW_API_KEY=your_key_here
+```
+
+#### Transit API (optional departures source)
+
+Transit can be selected in the route detail panel as a timing source. It is
+used on demand only and cached locally because the free API quota is limited.
+It does not provide live vehicle positions for the map.
+
+Add to `.env.local`:
+
+```bash
+TRANSIT_API_KEY=your_key_here
 ```
 
 ### 3. Restart dev server
@@ -173,6 +190,7 @@ Then on https://vercel.com:
    - `CANBERRA_CLIENT_ID`
    - `CANBERRA_CLIENT_SECRET`
    - `NSW_API_KEY`
+   - `TRANSIT_API_KEY` (optional; enables Transit timing source)
 6. Redeploy
 
 Optional overrides if you ever need them:

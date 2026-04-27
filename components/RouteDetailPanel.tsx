@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Clock, History, Loader2, X, Bus, MapPin } from "lucide-react";
-import type { Vehicle } from "@/lib/types";
+import type { Provider, TimingProvider, Vehicle } from "@/lib/types";
 import type { RouteStop } from "@/lib/routes";
+import { PoweredByTransit } from "./PoweredByTransit";
 
 interface Departure {
   tripId: string;
@@ -29,6 +30,7 @@ interface DeparturesResponse {
   toStopId: string | null;
   toStopName: string | null;
   supportsTo: boolean;
+  source?: { provider: TimingProvider; label: string };
   stops: { id: string; name: string; count: number }[];
   now: { hhmm: string; yyyymmdd: string; tz: string };
   past: Departure[];
@@ -43,6 +45,15 @@ interface RouteInfo {
 
 type Tab = "vehicles" | "departures";
 
+const TIMING_SOURCES: Array<{ id: TimingProvider; label: string }> = [
+  { id: "auto", label: "Auto" },
+  { id: "canberra", label: "ACT" },
+  { id: "nsw", label: "NSW" },
+  { id: "anytrip", label: "AnyTrip" },
+  { id: "nextthere", label: "NextThere" },
+  { id: "transit", label: "Transit" },
+];
+
 type DepFetchState =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -56,13 +67,6 @@ function fmtWait(m: number): string {
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
-}
-
-function fmtAge(timestamp: number): string {
-  const s = Math.max(0, Math.floor(Date.now() / 1000) - timestamp);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  return `${Math.floor(s / 3600)}h ago`;
 }
 
 function useLiveTick(intervalMs = 1000): number {
@@ -81,6 +85,8 @@ export function RouteDetailPanel({
   onClose,
   onFocusVehicle,
   stops,
+  timingProvider,
+  onTimingProviderChange,
 }: {
   route: RouteInfo;
   color?: string | null;
@@ -88,24 +94,37 @@ export function RouteDetailPanel({
   onClose: () => void;
   onFocusVehicle?: (v: Vehicle) => void;
   stops?: RouteStop[];
+  timingProvider: TimingProvider;
+  onTimingProviderChange: (provider: TimingProvider) => void;
 }) {
   const [tab, setTab] = useState<Tab>("vehicles");
+  // Normalise "R7" → "7" so comparisons work across providers
+  const normalise = (s: string) => s.replace(/^r(\d+)$/i, "$1");
+  const canonicalNumber = normalise(route.number);
   const [depState, setDepState] = useState<DepFetchState>({ kind: "idle" });
   const [stopId, setStopId] = useState<string | null>(null);
+  const [toStopId, setToStopId] = useState<string | null>(null);
   const [stopPickerOpen, setStopPickerOpen] = useState(false);
+  const [toPickerOpen, setToPickerOpen] = useState(false);
+  const [vehicleSource, setVehicleSource] = useState<Provider | "all">("all");
+  const [sourceVehicles, setSourceVehicles] = useState<Vehicle[] | null>(null);
   const stopPickerRef = useRef<HTMLDivElement>(null);
+  const toPickerRef = useRef<HTMLDivElement>(null);
   const tint = color ?? "#06b6d4";
 
   useEffect(() => {
-    if (!stopPickerOpen) return;
+    if (!stopPickerOpen && !toPickerOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (!stopPickerRef.current?.contains(e.target as Node)) {
+      if (stopPickerOpen && !stopPickerRef.current?.contains(e.target as Node)) {
         setStopPickerOpen(false);
+      }
+      if (toPickerOpen && !toPickerRef.current?.contains(e.target as Node)) {
+        setToPickerOpen(false);
       }
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
-  }, [stopPickerOpen]);
+  }, [stopPickerOpen, toPickerOpen]);
 
   useEffect(() => {
     if (tab !== "departures") return;
@@ -113,8 +132,10 @@ export function RouteDetailPanel({
     const run = async () => {
       setDepState((s) => (s.kind === "loaded" ? s : { kind: "loading" }));
       try {
-        const params = new URLSearchParams({ number: route.number });
+        const params = new URLSearchParams({ number: canonicalNumber });
         if (stopId) params.set("stopId", stopId);
+        if (toStopId) params.set("toStopId", toStopId);
+        params.set("provider", timingProvider);
         const res = await fetch(`/api/route/departures?${params}`, {
           cache: "no-store",
         });
@@ -137,11 +158,55 @@ export function RouteDetailPanel({
       cancelled = true;
       clearInterval(id);
     };
-  }, [tab, route.number, stopId]);
+  }, [tab, route.number, stopId, toStopId, timingProvider]);
 
-  const routeVehicles = vehicles.filter(
-    (v) => v.routeShortName === route.number || v.routeId === route.number
-  );
+  // Fetch provider-specific vehicles when a source is selected
+  useEffect(() => {
+    if (vehicleSource === "all") {
+      setSourceVehicles(null);
+      return;
+    }
+    let cancelled = false;
+    const providerMap: Record<string, string> = {
+      canberra: "canberra",
+      nsw: "nsw",
+      anytrip: "anytrip",
+      nextthere: "nextthere",
+      transit: "transit",
+    };
+    const run = async () => {
+      try {
+        const res = await fetch(
+          `/api/vehicles?routes=${encodeURIComponent(canonicalNumber)}&provider=${providerMap[vehicleSource]}`,
+          { cache: "no-store" }
+        );
+        if (!res.ok) return;
+        const json = (await res.json()) as { vehicles: Vehicle[] };
+        if (!cancelled) {
+          setSourceVehicles(
+            json.vehicles.filter(
+              (v) => normalise(v.routeShortName ?? v.routeId ?? "") === canonicalNumber
+            )
+          );
+        }
+      } catch {}
+    };
+    run();
+    const id = setInterval(run, 8_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [vehicleSource, canonicalNumber]);
+
+  const routeMatches = (v: Vehicle) =>
+    normalise(v.routeShortName ?? v.routeId ?? "") === canonicalNumber;
+
+  const routeVehicles = vehicleSource === "all"
+    ? vehicles.filter(routeMatches)
+    : (sourceVehicles ?? vehicles.filter(
+        (v) => routeMatches(v) && v.provider === vehicleSource
+      ));
 
   return (
     <div className="pointer-events-auto absolute inset-y-0 left-0 z-[1000] w-[340px] max-w-[85vw] flex-col border-r border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur transition-transform duration-300">
@@ -197,9 +262,27 @@ export function RouteDetailPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: "touch" }}>
         {tab === "vehicles" ? (
-          <VehiclesTab vehicles={routeVehicles} tint={tint} routeNumber={route.number} onFocusVehicle={onFocusVehicle} stops={stops} />
+          <>
+            <VehicleSourcePicker source={vehicleSource} onSourceChange={setVehicleSource} vehicles={vehicles.filter(routeMatches)} />
+            <VehiclesTab vehicles={routeVehicles} tint={tint} routeNumber={canonicalNumber} onFocusVehicle={onFocusVehicle} stops={stops} />
+          </>
         ) : (
-          <DeparturesTabContent state={depState} tint={tint} routeNumber={route.number} stopId={stopId} setStopId={setStopId} stopPickerOpen={stopPickerOpen} setStopPickerOpen={setStopPickerOpen} stopPickerRef={stopPickerRef} />
+          <DeparturesTabContent
+            state={depState}
+            tint={tint}
+            routeNumber={route.number}
+            setStopId={setStopId}
+            toStopId={toStopId}
+            setToStopId={setToStopId}
+            stopPickerOpen={stopPickerOpen}
+            setStopPickerOpen={setStopPickerOpen}
+            toPickerOpen={toPickerOpen}
+            setToPickerOpen={setToPickerOpen}
+            stopPickerRef={stopPickerRef}
+            toPickerRef={toPickerRef}
+            timingProvider={timingProvider}
+            onTimingProviderChange={onTimingProviderChange}
+          />
         )}
       </div>
     </div>
@@ -233,6 +316,65 @@ function TabBtn({
         </span>
       )}
     </button>
+  );
+}
+
+const VEHICLE_SOURCES: Array<{ id: Provider | "all"; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "canberra", label: "ACT" },
+  { id: "anytrip", label: "AnyTrip" },
+  { id: "nextthere", label: "NextThere" },
+  { id: "transit", label: "Transit" },
+  { id: "nsw", label: "NSW" },
+];
+
+function VehicleSourcePicker({
+  source,
+  onSourceChange,
+  vehicles,
+}: {
+  source: Provider | "all";
+  onSourceChange: (s: Provider | "all") => void;
+  vehicles: Vehicle[];
+}) {
+  const providerCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: vehicles.length };
+    for (const v of vehicles) {
+      counts[v.provider] = (counts[v.provider] ?? 0) + 1;
+    }
+    return counts;
+  }, [vehicles]);
+
+  return (
+    <div className="border-b border-neutral-800 px-4 py-2.5">
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+        Vehicle source
+      </div>
+      <div className="flex gap-1 overflow-x-auto rounded-lg bg-neutral-900/60 p-1">
+        {VEHICLE_SOURCES.map((s) => {
+          const count = providerCounts[s.id] ?? 0;
+          if (s.id !== "all" && count === 0) return null;
+          return (
+            <button
+              key={s.id}
+              onClick={() => onSourceChange(s.id)}
+              className={`shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium transition ${
+                source === s.id
+                  ? "bg-neutral-100 text-neutral-900"
+                  : "text-neutral-400 hover:text-neutral-100"
+              }`}
+            >
+              {s.label}
+              {count > 0 && (
+                <span className="ml-1 text-[9px] tabular-nums opacity-60">
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -272,7 +414,7 @@ function getUpcomingStops(
   }
 
   const upcoming = stops.slice(closestIdx + 1, closestIdx + 11);
-  return upcoming.map((s, i) => {
+  return upcoming.map((s) => {
     const m = dist(vehicle.lat, vehicle.lon, s.lat, s.lon);
     return {
       id: s.id,
@@ -421,41 +563,90 @@ function DeparturesTabContent({
   state,
   tint,
   routeNumber,
-  stopId,
   setStopId,
+  toStopId,
+  setToStopId,
   stopPickerOpen,
   setStopPickerOpen,
+  toPickerOpen,
+  setToPickerOpen,
   stopPickerRef,
+  toPickerRef,
+  timingProvider,
+  onTimingProviderChange,
 }: {
   state: DepFetchState;
   tint: string;
   routeNumber: string;
-  stopId: string | null;
   setStopId: (id: string) => void;
+  toStopId: string | null;
+  setToStopId: (id: string | null) => void;
   stopPickerOpen: boolean;
   setStopPickerOpen: (v: boolean) => void;
+  toPickerOpen: boolean;
+  setToPickerOpen: (v: boolean) => void;
   stopPickerRef: React.RefObject<HTMLDivElement | null>;
+  toPickerRef: React.RefObject<HTMLDivElement | null>;
+  timingProvider: TimingProvider;
+  onTimingProviderChange: (provider: TimingProvider) => void;
 }) {
+  const sourcePicker = (
+    <div className="border-b border-neutral-800 px-4 py-3">
+      <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+        Timing source
+      </div>
+      <div className="flex gap-1 overflow-x-auto rounded-lg bg-neutral-900/60 p-1">
+        {TIMING_SOURCES.map((source) => (
+          <button
+            key={source.id}
+            onClick={() => onTimingProviderChange(source.id)}
+            className={`shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium transition ${
+              timingProvider === source.id
+                ? "bg-neutral-100 text-neutral-900"
+                : "text-neutral-400 hover:text-neutral-100"
+            }`}
+          >
+            {source.label}
+          </button>
+        ))}
+      </div>
+      {timingProvider === "transit" && (
+        <div className="mt-2">
+          <PoweredByTransit />
+        </div>
+      )}
+    </div>
+  );
+
   if (state.kind === "unsupported") {
     return (
-      <div className="px-4 py-8 text-center text-xs text-neutral-500">
-        Timetable not available for this route.
-      </div>
+      <>
+        {sourcePicker}
+        <div className="px-4 py-8 text-center text-xs text-neutral-500">
+          Timetable not available from this source for route {routeNumber}.
+        </div>
+      </>
     );
   }
   if (state.kind === "idle" || state.kind === "loading") {
     return (
-      <div className="flex items-center gap-2 px-4 py-8 text-xs text-neutral-400">
-        <Loader2 size={14} className="animate-spin" />
-        Loading timetable for {routeNumber}…
-      </div>
+      <>
+        {sourcePicker}
+        <div className="flex items-center gap-2 px-4 py-8 text-xs text-neutral-400">
+          <Loader2 size={14} className="animate-spin" />
+          Loading timetable for {routeNumber}…
+        </div>
+      </>
     );
   }
   if (state.kind === "error") {
     return (
-      <div className="px-4 py-8 text-xs text-red-300">
-        Couldn&apos;t load timetable: {state.message}
-      </div>
+      <>
+        {sourcePicker}
+        <div className="px-4 py-8 text-xs text-red-300">
+          Couldn&apos;t load timetable: {state.message}
+        </div>
+      </>
     );
   }
 
@@ -463,43 +654,114 @@ function DeparturesTabContent({
   const firstNext = d.next[0];
 
   return (
-    <div className="px-4 py-3">
-      {/* Stop picker */}
-      <div className="relative mb-3" ref={stopPickerRef}>
-        <button
-          onClick={() => setStopPickerOpen(!stopPickerOpen)}
-          className="flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-left text-xs text-neutral-300 hover:border-neutral-700"
-        >
-          <span className="min-w-0 truncate">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-neutral-500">
-              From
-            </span>
-            <span className="font-medium text-neutral-100">{d.stopName}</span>
-          </span>
-          <ChevronDown size={14} className="shrink-0 text-neutral-500" />
-        </button>
-        {stopPickerOpen && (
-          <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[40dvh] overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur">
-            {d.stops.slice(0, 200).map((s) => (
-              <li key={s.id}>
-                <button
-                  onClick={() => {
-                    setStopId(s.id);
-                    setStopPickerOpen(false);
-                  }}
-                  className={`block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-neutral-900 ${
-                    s.id === d.stopId
-                      ? "bg-neutral-900 text-cyan-300"
-                      : "text-neutral-300"
-                  }`}
-                >
-                  {s.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+    <>
+      {sourcePicker}
+      <div className="px-4 py-3">
+        {/* From / To stop pickers */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {/* From picker */}
+          <div className={`relative ${stopPickerOpen ? "z-30" : ""}`} ref={stopPickerRef}>
+            <button
+              onClick={() => { setStopPickerOpen(!stopPickerOpen); setToPickerOpen(false); }}
+              className="flex w-full items-center justify-between gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-2 text-left text-xs text-neutral-300 hover:border-neutral-700"
+            >
+              <span className="min-w-0 truncate">
+                <span className="mr-1 text-[10px] uppercase tracking-wider text-neutral-500">
+                  From
+                </span>
+                <span className="font-medium text-neutral-100 truncate">{d.stopName}</span>
+              </span>
+              <ChevronDown size={12} className="shrink-0 text-neutral-500" />
+            </button>
+            {stopPickerOpen && (
+              <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[40dvh] overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur">
+                {d.stops.slice(0, 200).map((s) => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => {
+                        setStopId(s.id);
+                        setStopPickerOpen(false);
+                      }}
+                      className={`block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-neutral-900 ${
+                        s.id === d.stopId
+                          ? "bg-neutral-900 text-cyan-300"
+                          : "text-neutral-300"
+                      }`}
+                    >
+                      {s.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* To picker */}
+          <div className={`relative ${toPickerOpen ? "z-30" : ""}`} ref={toPickerRef}>
+            <button
+              onClick={() => { setToPickerOpen(!toPickerOpen); setStopPickerOpen(false); }}
+              className="flex w-full items-center justify-between gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-2 text-left text-xs text-neutral-300 hover:border-neutral-700"
+            >
+              <span className="min-w-0 truncate">
+                <span className="mr-1 text-[10px] uppercase tracking-wider text-neutral-500">
+                  To
+                </span>
+                <span className="font-medium text-neutral-100 truncate">
+                  {d.toStopName ?? "All"}
+                </span>
+              </span>
+              <ChevronDown size={12} className="shrink-0 text-neutral-500" />
+            </button>
+            {toPickerOpen && (
+              <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[40dvh] overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur">
+                <li>
+                  <button
+                    onClick={() => {
+                      setToStopId(null);
+                      setToPickerOpen(false);
+                    }}
+                    className={`block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-neutral-900 ${
+                      toStopId == null
+                        ? "bg-neutral-900 text-cyan-300"
+                        : "text-neutral-400"
+                    }`}
+                  >
+                    All
+                  </button>
+                </li>
+                {d.stops.slice(0, 200).map((s) => {
+                  const isDisabled = s.id === d.stopId;
+                  return (
+                    <li key={s.id}>
+                      <button
+                        disabled={isDisabled}
+                        onClick={() => {
+                          if (!isDisabled) {
+                            setToStopId(s.id);
+                            setToPickerOpen(false);
+                          }
+                        }}
+                        className={`block w-full truncate px-3 py-1.5 text-left text-xs ${
+                          isDisabled
+                            ? "cursor-not-allowed text-neutral-600"
+                            : "hover:bg-neutral-900"
+                        } ${
+                          s.id === toStopId
+                            ? "bg-neutral-900 text-cyan-300"
+                            : isDisabled
+                            ? ""
+                            : "text-neutral-300"
+                        }`}
+                      >
+                        {s.name}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
 
       {/* Quick next summary */}
       {firstNext && (
@@ -508,6 +770,12 @@ function DeparturesTabContent({
           <span className="font-mono font-medium text-neutral-100">
             {firstNext.time}
           </span>
+          {d.toStopId && firstNext.arriveTime && (
+            <>
+              <span className="text-neutral-400"> → </span>
+              <span className="font-mono font-medium text-neutral-100">{firstNext.arriveTime}</span>
+            </>
+          )}
           <span className="text-neutral-400"> · in </span>
           <span style={{ color: tint }} className="font-medium">
             {fmtWait(firstNext.minutesFromNow)}
@@ -524,7 +792,7 @@ function DeparturesTabContent({
           </div>
           <ul className="space-y-0.5">
             {d.past.map((dep) => (
-              <DepRow key={dep.tripId + dep.date} dep={dep} past tint={tint} />
+              <DepRow key={dep.tripId + dep.date} dep={dep} past tint={tint} showArrival={!!d.toStopId} />
             ))}
           </ul>
         </div>
@@ -538,21 +806,24 @@ function DeparturesTabContent({
         </div>
         {d.next.length === 0 ? (
           <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs text-neutral-500">
-            No more trips scheduled today.
+            {d.toStopId
+              ? "No more trips today from this stop to your destination."
+              : "No more trips scheduled today."}
           </div>
         ) : (
           <ul className="space-y-0.5">
             {d.next.map((dep) => (
-              <DepRow key={dep.tripId + dep.date} dep={dep} tint={tint} />
+              <DepRow key={dep.tripId + dep.date} dep={dep} tint={tint} showArrival={!!d.toStopId} />
             ))}
           </ul>
         )}
       </div>
 
-      <div className="mt-2 text-[10px] text-neutral-600">
-        Scheduled times · as of {d.now.hhmm}
+        <div className="mt-2 text-[10px] text-neutral-600">
+          {d.source?.label ?? "Scheduled"} times · as of {d.now.hhmm}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -560,10 +831,12 @@ function DepRow({
   dep,
   past,
   tint,
+  showArrival,
 }: {
   dep: Departure;
   past?: boolean;
   tint: string;
+  showArrival?: boolean;
 }) {
   return (
     <li
@@ -574,9 +847,24 @@ function DepRow({
       <span className="w-11 shrink-0 font-mono text-sm tabular-nums">
         {dep.time}
       </span>
-      <span className="min-w-0 flex-1 truncate text-xs">
-        → {dep.headsign || dep.terminusName || "—"}
-      </span>
+      {showArrival && dep.arriveTime ? (
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs">
+          <span className="text-neutral-500">→</span>
+          <span className="font-mono tabular-nums">{dep.arriveTime}</span>
+          {dep.durationMin != null && dep.durationMin > 0 && (
+            <span className="shrink-0 text-[10px] text-neutral-500">
+              · {fmtWait(dep.durationMin)}
+            </span>
+          )}
+          <span className="min-w-0 truncate text-[11px] text-neutral-500">
+            {dep.headsign || dep.terminusName || ""}
+          </span>
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-xs">
+          → {dep.headsign || dep.terminusName || "—"}
+        </span>
+      )}
       <span
         className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
         style={

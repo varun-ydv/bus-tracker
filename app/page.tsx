@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useCallback, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { VehiclesResponse, Vehicle } from "@/lib/types";
+import type { VehicleProviderFilter, VehiclesResponse, Vehicle } from "@/lib/types";
 import { BusCard } from "@/components/BusCard";
 import { StatusBar } from "@/components/StatusBar";
+import { PoweredByTransit } from "@/components/PoweredByTransit";
 import { QuickFilters, type QuickFiltersState } from "@/components/QuickFilters";
 import {
   DEFAULT_FAVOURITE_NUMBERS,
@@ -13,6 +14,20 @@ import {
 } from "@/lib/favourites";
 import { Map, RefreshCw, Settings, MoonStar } from "lucide-react";
 import Link from "next/link";
+
+const VEHICLE_PROVIDERS = new Set<VehicleProviderFilter>([
+  "all",
+  "canberra",
+  "nsw",
+  "anytrip",
+  "nextthere",
+]);
+
+function vehicleProviderFromParam(raw: string | null): VehicleProviderFilter {
+  return raw && VEHICLE_PROVIDERS.has(raw as VehicleProviderFilter)
+    ? (raw as VehicleProviderFilter)
+    : "all";
+}
 
 function HomePageInner() {
   const router = useRouter();
@@ -27,7 +42,11 @@ function HomePageInner() {
         : routesParam === ""
         ? new Set<string>()
         : new Set(routesParam.split(",").map((s) => s.trim()).filter(Boolean));
-    return { routes, place: searchParams.get("place") };
+    return {
+      routes,
+      place: searchParams.get("place"),
+      provider: vehicleProviderFromParam(searchParams.get("provider")),
+    };
     // initial only — deliberately omit searchParams from deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -47,6 +66,7 @@ function HomePageInner() {
       params.set("routes", ""); // explicit empty => "show everything"
     }
     if (filters.place) params.set("place", filters.place);
+    if (filters.provider !== "all") params.set("provider", filters.provider);
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }, [filters, router]);
@@ -59,6 +79,7 @@ function HomePageInner() {
         params.set("routes", Array.from(filters.routes).join(","));
       }
       if (filters.place) params.set("place", filters.place);
+      if (filters.provider !== "all") params.set("provider", filters.provider);
       const res = await fetch(`/api/vehicles?${params.toString()}`, {
         cache: "no-store",
       });
@@ -93,6 +114,7 @@ function HomePageInner() {
       p.set("routes", Array.from(filters.routes).join(","));
     }
     if (filters.place) p.set("place", filters.place);
+    if (filters.provider !== "all") p.set("provider", filters.provider);
     const qs = p.toString();
     return qs ? `/map?${qs}` : "/map";
   })();
@@ -136,6 +158,11 @@ function HomePageInner() {
       </header>
 
       <StatusBar data={data} />
+      {data?.providers.transit.configured && (
+        <div className="mb-3">
+          <PoweredByTransit />
+        </div>
+      )}
 
       <QuickFilters state={filters} onChange={setFilters} />
 
