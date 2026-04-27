@@ -504,9 +504,33 @@ function VehiclesTab({
                   ) : null;
                 })()}
                 {speedKmh != null && <span>{speedKmh} km/h</span>}
-                {v.occupancy && (
-                  <span>{v.occupancy.replaceAll("_", " ").toLowerCase()}</span>
-                )}
+                {(() => {
+                  const occ = v.occupancy?.toUpperCase();
+                  if (!occ) return null;
+                  let occColor = "#22c55e";
+                  let occLabel = "Seats";
+                  if (occ === "EMPTY" || occ === "MANY_SEATS_AVAILABLE") {
+                    occColor = "#22c55e";
+                    occLabel = "Seats";
+                  } else if (occ === "FEW_SEATS_AVAILABLE") {
+                    occColor = "#eab308";
+                    occLabel = "Few";
+                  } else if (occ === "STANDING_ROOM_ONLY") {
+                    occColor = "#f97316";
+                    occLabel = "Standing";
+                  } else if (occ === "CRUSHED_STANDING_ROOM_ONLY" || occ === "FULL" || occ === "NOT_ACCEPTING_PASSENGERS") {
+                    occColor = "#ef4444";
+                    occLabel = "Full";
+                  }
+                  return (
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                      style={{ background: `${occColor}22`, color: occColor }}
+                    >
+                      {occLabel}
+                    </span>
+                  );
+                })()}
                 {upcoming.length > 0 && !isOpen && (
                   <span className="text-neutral-600">
                     {upcoming[0].distanceStr} to next stop

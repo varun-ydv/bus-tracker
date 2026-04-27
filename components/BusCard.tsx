@@ -10,6 +10,15 @@ const PROVIDER_BADGE: Record<Vehicle["provider"], string> = {
   transit: "TR",
 };
 
+function occupancyDisplay(occ: string | null | undefined): { color: string; label: string } | null {
+  if (!occ) return null;
+  const o = occ.toUpperCase();
+  if (o === "EMPTY" || o === "MANY_SEATS_AVAILABLE") return { color: "#22c55e", label: "Seats" };
+  if (o === "FEW_SEATS_AVAILABLE") return { color: "#eab308", label: "Few seats" };
+  if (o === "STANDING_ROOM_ONLY") return { color: "#f97316", label: "Standing" };
+  return { color: "#ef4444", label: "Full" };
+}
+
 export function BusCard({ vehicle }: { vehicle: Vehicle }) {
   const ageSeconds = Math.max(
     0,
@@ -91,11 +100,18 @@ export function BusCard({ vehicle }: { vehicle: Vehicle }) {
             {vehicle.statusString}
           </div>
         )}
-        {vehicle.occupancy && (
-          <div className="mt-0.5 text-[10px] text-neutral-500">
-            {vehicle.occupancy.replaceAll("_", " ").toLowerCase()}
-          </div>
-        )}
+        {(() => {
+          const occ = occupancyDisplay(vehicle.occupancy);
+          return occ ? (
+            <div className="mt-0.5 flex items-center gap-1 text-[10px] text-neutral-400">
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: occ.color }}
+              />
+              {occ.label}
+            </div>
+          ) : null;
+        })()}
         <ChevronRight size={16} className="shrink-0 text-neutral-600" />
       </div>
     </Link>

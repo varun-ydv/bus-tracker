@@ -484,18 +484,30 @@ const anytripCache = new Map<string, AnytripCacheEntry>();
 const ANYTRIP_TTL = 10 * 60 * 1000;
 
 async function getAnytripRoute(number: string): Promise<RouteGeometry | null> {
-  const routeGroupId = ANYTRIP_ROUTE_GROUPS[number];
-  if (!routeGroupId) return null;
-
   const cached = anytripCache.get(number);
   if (cached && Date.now() - cached.at < ANYTRIP_TTL) return cached.data;
+
+  let routeGroupId = ANYTRIP_ROUTE_GROUPS[number];
+  let apiBase = ANYTRIP_API_BASE;
+  let agency = "Qcity Transit";
+
+  if (!routeGroupId) {
+    const actGroupId = ANYTRIP_ACT_ROUTE_GROUPS[number];
+    if (actGroupId) {
+      routeGroupId = actGroupId;
+      apiBase = ANYTRIP_ACT_API_BASE;
+      agency = "Transport Canberra";
+    }
+  }
+
+  if (!routeGroupId) return null;
 
   const enc = encodeURIComponent(routeGroupId);
   const headers = { "User-Agent": ANYTRIP_USER_AGENT, Accept: "application/json" };
 
   const [shapesRes, stopsRes] = await Promise.all([
-    fetch(`${ANYTRIP_API_BASE}/routeGroup/${enc}/shapes`, { headers, cache: "no-store" }),
-    fetch(`${ANYTRIP_API_BASE}/routeGroup/${enc}/stops`, { headers, cache: "no-store" }),
+    fetch(`${apiBase}/routeGroup/${enc}/shapes`, { headers, cache: "no-store" }),
+    fetch(`${apiBase}/routeGroup/${enc}/stops`, { headers, cache: "no-store" }),
   ]);
 
   if (!shapesRes.ok) {
@@ -537,7 +549,6 @@ async function getAnytripRoute(number: string): Promise<RouteGeometry | null> {
       });
     }
   }
-  // Fallback: derive color from the shapes payload if stops didn't carry it.
   if (!color) {
     const rgShapes = shapesJson.response?.routeGroup?.color;
     if (rgShapes) color = `#${rgShapes}`;
@@ -546,7 +557,7 @@ async function getAnytripRoute(number: string): Promise<RouteGeometry | null> {
   const geometry: RouteGeometry = {
     number,
     color,
-    agency: "Qcity Transit",
+    agency,
     source: "anytrip",
     shapes,
     stops,

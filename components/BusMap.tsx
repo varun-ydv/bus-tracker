@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 import {
   CircleMarker,
   MapContainer,
@@ -246,13 +247,150 @@ function CaptureMap({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }
   return null;
 }
 
+interface ServiceAlert {
+  id: string;
+  header: string;
+  description?: string;
+  routeGroups?: string[];
+  url?: string;
+}
+
+function useServiceAlerts() {
+  const [alerts, setAlerts] = useState<ServiceAlert[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAlerts = async () => {
+      try {
+        const res = await fetch("/api/alerts", { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as { alerts: ServiceAlert[] };
+        if (!cancelled) setAlerts(json.alerts ?? []);
+      } catch {}
+    };
+    fetchAlerts();
+    const id = setInterval(fetchAlerts, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+  return alerts;
+}
+
+function AlertsPanel({
+  alerts,
+  selectedRoute,
+  onClose,
+}: {
+  alerts: ServiceAlert[];
+  selectedRoute: string | null;
+  onClose: () => void;
+}) {
+  const normalise = (s: string) => s.replace(/^r(\d+)$/i, "$1");
+  const normalisedRoute = selectedRoute ? normalise(selectedRoute) : null;
+
+  const isRelevant = (alert: ServiceAlert) => {
+    if (!normalisedRoute || !alert.routeGroups?.length) return false;
+    return alert.routeGroups.some((rg) => {
+      const parts = rg.split(":");
+      const name = parts[parts.length - 1];
+      return normalise(name) === normalisedRoute;
+    });
+  };
+
+  const sorted = useMemo(() => {
+    return [...alerts].sort((a, b) => {
+      const aRel = isRelevant(a) ? 0 : 1;
+      const bRel = isRelevant(b) ? 0 : 1;
+      return aRel - bRel;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alerts, normalisedRoute]);
+
+  return (
+    <div className="absolute inset-y-0 right-0 z-[1100] w-[340px] max-w-[85vw] flex flex-col border-l border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur">
+      <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
+        <AlertTriangle size={16} className="text-amber-400" />
+        <span className="text-sm font-semibold text-neutral-100">
+          Service Alerts
+        </span>
+        <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+          {alerts.length}
+        </span>
+        <button
+          onClick={onClose}
+          className="ml-auto rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+          aria-label="Close alerts"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2">
+        {sorted.length === 0 ? (
+          <div className="py-8 text-center text-xs text-neutral-500">
+            No active alerts
+          </div>
+        ) : (
+          sorted.map((alert) => {
+            const relevant = isRelevant(alert);
+            return (
+              <div
+                key={alert.id}
+                className={`rounded-xl border p-3 ${
+                  relevant
+                    ? "border-amber-500/40 bg-amber-950/20"
+                    : "border-neutral-800 bg-neutral-900/60"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle
+                    size={14}
+                    className={`mt-0.5 shrink-0 ${
+                      relevant ? "text-amber-400" : "text-neutral-500"
+                    }`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-neutral-100">
+                      {alert.header}
+                    </div>
+                    {alert.description && (
+                      <div className="mt-1 text-[11px] leading-relaxed text-neutral-400">
+                        {alert.description}
+                      </div>
+                    )}
+                    {alert.url && (
+                      <a
+                        href={alert.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1.5 inline-block text-[11px] text-cyan-400 hover:underline"
+                      >
+                        More info
+                      </a>
+                    )}
+                    {relevant && (
+                      <span className="mt-1.5 inline-block rounded-full bg-amber-400/20 px-2 py-0.5 text-[9px] font-medium text-amber-400">
+                        Affects your route
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function BusMap() {
   const router = useRouter();
   const [data, setData] = useState<VehiclesResponse | null>(null);
   const [basemap, setBasemap] = usePersistedBasemap();
   const [basemapOpen, setBasemapOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
   const searchParams = useSearchParams();
+
+  const alerts = useServiceAlerts();
 
   const routesParam = searchParams.get("routes");
   const placeParam = searchParams.get("place");
@@ -492,9 +630,18 @@ export default function BusMap() {
                 {v.speed != null && (
                   <div>Speed: {(v.speed * 3.6).toFixed(0)} km/h</div>
                 )}
-                {v.occupancy && (
-                  <div>Occupancy: {v.occupancy.replaceAll("_", " ").toLowerCase()}</div>
-                )}
+                {v.occupancy && (() => {
+                  const o = v.occupancy.toUpperCase();
+                  let occColor = "#22c55e";
+                  if (o === "FEW_SEATS_AVAILABLE") occColor = "#eab308";
+                  else if (o === "STANDING_ROOM_ONLY") occColor = "#f97316";
+                  else if (o === "CRUSHED_STANDING_ROOM_ONLY" || o === "FULL" || o === "NOT_ACCEPTING_PASSENGERS") occColor = "#ef4444";
+                  return (
+                    <div style={{ color: occColor }}>
+                      Occupancy: {v.occupancy.replaceAll("_", " ").toLowerCase()}
+                    </div>
+                  );
+                })()}
                 {v.statusString && (
                   <div className="mt-1 italic text-neutral-600">
                     {v.statusString}
@@ -510,6 +657,31 @@ export default function BusMap() {
       })}
 
     </MapContainer>
+
+    {/* Alert bell — top-right floating button */}
+    <div className="absolute top-3 right-3 z-[1000]">
+      <button
+        onClick={() => setAlertsOpen((o) => !o)}
+        className="relative flex h-9 w-9 items-center justify-center rounded-full bg-neutral-900/90 text-neutral-300 shadow-lg backdrop-blur hover:bg-neutral-800 hover:text-white"
+        title="Service alerts"
+      >
+        <AlertTriangle size={16} />
+        {alerts.length > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-neutral-950">
+            {alerts.length > 9 ? "9+" : alerts.length}
+          </span>
+        )}
+      </button>
+    </div>
+
+    {/* Alerts side panel */}
+    {alertsOpen && (
+      <AlertsPanel
+        alerts={alerts}
+        selectedRoute={singleRoute}
+        onClose={() => setAlertsOpen(false)}
+      />
+    )}
 
     {/* Basemap layer picker — bottom-right floating button */}
     <div className="absolute bottom-3 right-3 z-[1000] flex flex-col items-end gap-1.5">
